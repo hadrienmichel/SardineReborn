@@ -5,6 +5,16 @@ import re
 from copy import deepcopy
 import numpy as np
 import time
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
+NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'),
+                                  (None, None, None, None), 
+                                  ('Pan', 'Left button pans, Ri...xes aspect', 'move', 'pan'), 
+                                  ('Zoom', 'Zoom to rectangle\nx/...xes aspect', 'zoom_to_rect', 'zoom'),
+                                  (None, None, None, None), 
+                                  ('Save', 'Save the figure', 'filesave', 'save_figure')]
+from matplotlib.figure import Figure
 ## Imports for the seismic data input
 from obspy import read
 ## Imports for the data inversion
@@ -15,14 +25,26 @@ from PyQt5.QtWidgets import (
     QWidget,
     QTabWidget,
     QHBoxLayout,
+    QVBoxLayout,
+    QGridLayout,
     QCheckBox,
     QAction,
     QMainWindow,
     QStatusBar,
     QMessageBox,
-    QFileDialog)
+    QFileDialog,
+    QComboBox,
+    QPushButton,
+    QTextEdit)
 
 defaultStatus = "Idle."
+
+class MplCanvas(FigureCanvasQTAgg):
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = fig.add_subplot(111)
+        fig.tight_layout()
+        super(MplCanvas, self).__init__(fig)
 
 class paths():
     def __init__(self) -> None:
@@ -72,12 +94,12 @@ class Window(QMainWindow):
         self.resize(600,350)
 
         ## Adding tabs to the layout
-        tabs = QTabWidget(self)
-        tabs.addTab(self._pickTracesTabUI(), 'Traces picking')
-        tabs.addTab(self._inversionTabUI(), 'Inversion')
-        tabs.addTab(self._modelTabUI(), 'Model')
+        self.tabs = QTabWidget(self)
+        self.tabs.addTab(self._pickTracesTabUI(), 'Traces picking')
+        self.tabs.addTab(self._inversionTabUI(), 'Inversion')
+        self.tabs.addTab(self._modelTabUI(), 'Model')
 
-        self.setCentralWidget(tabs) 
+        self.setCentralWidget(self.tabs) 
 
         ## Defining menu actions:
         openFile = QAction("&Open Geometry File",self)
@@ -112,6 +134,8 @@ class Window(QMainWindow):
         self.statusBar = QStatusBar(self)
         self.statusBar.showMessage(defaultStatus)
         self.setStatusBar(self.statusBar)
+
+        pass
 
     def showEvent(self, event):
         msgBox = QMessageBox(self)
@@ -177,59 +201,52 @@ class Window(QMainWindow):
             reply = QMessageBox.question(self, 'Overwritting data . . .', 'Are you sure you want to overwrite the current dataset?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
             if reply == QMessageBox.Yes:
                 ## Setting up the paths:
-                self.dataUI.paths.directory = path
-                self.dataUI.paths.geometryFile = file
-                self.dataUI.paths.nbFiles = len(sourcesId)
-                self.dataUI.paths.seg2Files = SEG2Files
-
-                ## Setting up the data:
-                self.dataUI.geometry.sensors = sensors
-                self.dataUI.geometry.sourcesId = sourcesId
-
-                ## Reading the datasets:
-                for name  in SEG2Files:
-                    _, ext = os.path.splitext(name)
-                    if ext == '.segy' or ext == '.sgy':
-                        st = read(os.path.join(path,name), 'SEGY')
-                    elif ext == '.seg2' or ext == '.sg2':
-                        st = read(os.path.join(path,name), 'SEG2')
-                    else:
-                        st = read(os.path.join(path,name), 'SEG2')
-                    if len(st) != len(ReceiversPosition): # If the number of geophones does not match between the loaded array and the gemoetry
-                        raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
-                    self.dataUI.sisData.append(st)
+                self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
 
                 ## Updating status bar
+                self.dataUI.dataLoaded = True
                 self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
             else:
                 self.statusBar.showMessage(f'No data loaded')
         else:
-            ## Setting up the paths:
-            self.dataUI.paths.directory = path
-            self.dataUI.paths.geometryFile = file
-            self.dataUI.paths.nbFiles = len(sourcesId)
-            self.dataUI.paths.seg2Files = SEG2Files
-
-            ## Setting up the data:
-            self.dataUI.geometry.sensors = sensors
-            self.dataUI.geometry.sourcesId = sourcesId
-
-            ## Reading the datasets:
-            for name  in SEG2Files:
-                _, ext = os.path.splitext(name)
-                if ext == '.segy' or ext == '.sgy':
-                    st = read(os.path.join(path,name), 'SEGY')
-                elif ext == '.seg2' or ext == '.sg2':
-                    st = read(os.path.join(path,name), 'SEG2')
-                else:
-                    st = read(os.path.join(path,name), 'SEG2')
-                if len(st) != len(ReceiversPosition): # If the number of geophones does not match between the loaded array and the gemoetry
-                    raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
-                self.dataUI.sisData.append(st)
+            self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
 
             ## Updating status bar
             self.dataUI.dataLoaded = True
             self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
+        
+        ## Return to the picking tab
+        self.updateTab()
+        self.tabs.setCurrentIndex(0)
+
+    def saveDataUI(self, path, file, SEG2Files, ReceiversPosition, sensors, sourcesId):
+        ## Setting up the paths:
+        self.dataUI.paths.directory = path
+        self.dataUI.paths.geometryFile = file
+        self.dataUI.paths.nbFiles = len(sourcesId)
+        self.dataUI.paths.seg2Files = SEG2Files
+
+            ## Setting up the data:
+        self.dataUI.geometry.sensors = sensors
+        self.dataUI.geometry.sourcesId = sourcesId
+
+            ## Reading the datasets:
+        for name  in SEG2Files:
+            _, ext = os.path.splitext(name)
+            if ext == '.segy' or ext == '.sgy':
+                st = read(os.path.join(path,name), 'SEGY')
+            elif ext == '.seg2' or ext == '.sg2':
+                st = read(os.path.join(path,name), 'SEG2')
+            else:
+                st = read(os.path.join(path,name), 'SEG2')
+            if len(st) != len(ReceiversPosition): # If the number of geophones does not match between the loaded array and the gemoetry
+                raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
+            self.dataUI.sisData.append(st)
+
+    def updateTab(self):
+        self.comboBoxFilesPicking.clear()
+        for name in self.dataUI.paths.seg2Files:
+            self.comboBoxFilesPicking.addItem(name)
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
@@ -247,10 +264,43 @@ class Window(QMainWindow):
         self.statusBar.showMessage(defaultStatus)
     
     def _pickTracesTabUI(self):
-        importTab = QWidget()
-        layout = QHBoxLayout()
-        layout.addWidget(QCheckBox('Option 1'))
-        layout.addWidget(QCheckBox('Option 2'))
+        importTab = QWidget(self.tabs)
+        layout = QGridLayout(self.tabs) # Grid of 10-by-15
+
+        ## Comb Box for choosing the correct file to pick.
+        self.comboBoxFilesPicking = QComboBox()
+        for name in self.dataUI.paths.seg2Files:
+            self.comboBoxFilesPicking.addItem(name)
+        layout.addWidget(self.comboBoxFilesPicking,0,0,1,15)
+
+        ## Main graph with all the traces
+        self.mainGraph = MplCanvas(importTab, width=8, height=7, dpi=100)
+        self.mainGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40])
+        # plt.tight_layout()
+        self.mainGraphToolbar = NavigationToolbar2QT(self.mainGraph, importTab)
+        mainGraphLayout = QVBoxLayout()
+        mainGraphLayout.addWidget(self.mainGraphToolbar)
+        mainGraphLayout.addWidget(self.mainGraph)
+        layout.addLayout(mainGraphLayout,2,0,9,10)
+        # self.mainGraph.
+
+        ## Zoom graph with the current trace
+        self.zoomGraph = MplCanvas(importTab, width=5, height=4, dpi=100)
+        self.zoomGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40])
+        self.zoomGraph.axes.tick_params(
+                axis='both',       # changes apply to the x-axis
+                which='both',      # both major and minor ticks are affected
+                bottom=False,      # ticks along the bottom edge are off
+                top=False,         # ticks along the top edge are off
+                left=False,
+                right=False,
+                labelleft=False,
+                labelbottom=False) # labels along the bottom edge are off
+        # plt.tight_layout()
+        layout.addWidget(self.zoomGraph,2,10,5,5)
+        layout.addWidget(QTextEdit(),7,10,2,5)
+        layout.addWidget(QPushButton('Option 1'),9,10,1,5)
+        layout.addWidget(QPushButton('Option 2'),10,10,1,5)
         importTab.setLayout(layout)
         return importTab
 
