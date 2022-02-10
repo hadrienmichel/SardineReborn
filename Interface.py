@@ -14,6 +14,7 @@ NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'
                                   ('Zoom', 'Zoom to rectangle\nx/...xes aspect', 'zoom_to_rect', 'zoom'),
                                   (None, None, None, None), 
                                   ('Save', 'Save the figure', 'filesave', 'save_figure')]
+from matplotlib import animation
 from matplotlib.figure import Figure
 ## Imports for the seismic data input
 from obspy import read
@@ -39,25 +40,23 @@ from PyQt5.QtWidgets import (
 
 defaultStatus = "Idle."
 
+## Need to take a closer look at this: https://programmerall.com/article/10751929193/
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = fig.add_subplot(111)
-        fig.tight_layout()
-        super(MplCanvas, self).__init__(fig)
-
+        self.fig = Figure(figsize=(width, height), dpi=dpi)
+        self.axes = self.fig.add_subplot(111)
+        self.fig.tight_layout()
+        super(MplCanvas, self).__init__(self.fig)
 class paths():
     def __init__(self) -> None:
         self.directory = []
         self.geometryFile = []
         self.nbFiles = []
         self.seg2Files = []
-
 class geometry():
     def __init__(self) -> None:
         self.sensors = []
         self.sourcesId = []
-
 class model():
     def __init__(self) -> None:
         self.nbLayers = 2
@@ -70,6 +69,14 @@ class model():
         self.thickLeft = np.ones((self.nbLayers-1,))*5
         self.dipAngles = np.zeros((self.nbLayers-1,))
         self.Vp = np.linspace(1000,3000,num=self.nbLayers)
+class animationPicking():
+    def __init__(self) -> None:
+        self.timeOnClick = 0        # To know if the click is in fixed position of to pan/zoom
+        self.mousePosition = 0      # Storing the current position of the mouse
+        self.currSelect = 0         # Storing the current trace number beiing analyzed
+        self.changedSelect = True   # Variable to tell if the trace selected is different
+        self.first = True           # Variable to tell if plotting for the first time
+        self.maxClickLength = 0.5   # Maximum time (in sec) to consider a click on place
 class dataStorage():
     def __init__(self) -> None:
         ## Data variables:
@@ -82,6 +89,10 @@ class dataStorage():
         self.dataLoaded = False
         self.pickingDone = False
         self.inversionDone = False
+        self.sisFileId = 0
+        self.beginTime = 0
+        ## Graphical animation variables:
+        self.animationPicking = animationPicking()
 class Window(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -137,6 +148,7 @@ class Window(QMainWindow):
 
         pass
 
+    ## Oppening and closing message boxes:
     def showEvent(self, event):
         msgBox = QMessageBox(self)
         msgBox.setIcon(QMessageBox.Information)
@@ -145,7 +157,6 @@ class Window(QMainWindow):
         msgBox.setWindowTitle('Welcome!')
         msgBox.show()
         event.accept()
-
     
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Closing ...', 'Are you sure you want to quit?', QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
@@ -153,7 +164,91 @@ class Window(QMainWindow):
             event.accept()
         else:
             event.ignore()
+        
+    ## Animations definitions:
+    def changeMouse(self, event):
+        if event.inaxes is not None:
+            self.dataUI.animationPicking.mousePosition = event.xdata
+        return 0
+
+    def onKey(self, event):
+        global changedSelect, currSelect
+        if event.key == "up": # Change i += 1
+            self.dataUI.animationPicking.currSelect += 1
+            if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
+                self.dataUI.animationPicking.currSelect = 0
+            self.dataUI.animationPicking.changedSelect = True
+        elif event.key == "down": # Change i -= 1
+            self.dataUI.animationPicking.currSelect -= 1
+            if self.dataUI.animationPicking.currSelect < 0:
+                self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
+            self.dataUI.animationPicking.changedSelect = True    
+        return 0
     
+    def onPress(self, event):
+        if event.button == 1:
+            self.dataUI.animationPicking.timeOnClick = time.time()
+        return 0
+
+    def onRelease(self, event):
+        if event.button == 1 and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
+            self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
+            self.dataUI.animationPicking.changedSelect = True
+        return 0
+    
+    def animationZoom(self, i):
+        axZoom = self.zoomGraph.axes
+        axMain = self.mainGraph.axes
+        # Get axis variables
+        deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
+        nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
+        timeSEG2 = np.arange(self.dataUI.beginTime, self.dataUI.beginTime+nbPoints*deltaT, deltaT)
+        # Change plot to go at the correct position:
+        axZoom.clear()
+        idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition+150*deltaT)
+        timeZoom = timeSEG2[idx]
+        axZoom.plot(timeZoom,self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx],color='k')
+        axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition-150*deltaT,right=self.dataUI.animationPicking.mousePosition+150*deltaT)
+        axZoom.autoscale(axis='y')
+        z = axZoom.get_ylim()
+        axZoom.plot([self.dataUI.animationPicking.mousePosition, self.dataUI.animationPicking.mousePosition],z,color='r')
+        if self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect] is not None:
+            axZoom.plot([self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect], self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect]], z,color='g')
+        axZoom.set_frame_on(False)
+        axZoom.tick_params(
+            axis='both',       # changes apply to the x-axis
+            which='both',      # both major and minor ticks are affected
+            bottom=False,      # ticks along the bottom edge are off
+            top=False,         # ticks along the top edge are off
+            left=False,
+            right=False,
+            labelleft=False,
+            labelbottom=False) # labels along the bottom edge are off
+        if self.dataUI.animationPicking.changedSelect:
+            # Change red graph + pick
+            if not(self.dataUI.animationPicking.first):
+                limitsY = axMain.get_ylim()
+                limitsX = axMain.get_xlim()
+            axMain.clear()
+            i = 0
+            for tr in self.dataUI.sisData[self.dataUI.sisFileId]:
+                data = tr.data 
+                data = data/(max(data)-min(data))+i
+                if i == self.dataUI.animationPicking.currSelect:
+                    axMain.plot(timeSEG2,data,color='r')
+                else:
+                    axMain.plot(timeSEG2,data,color='k')
+                if self.dataUI.picking[self.dataUI.sisFileId][i] is not None:
+                    axMain.plot([self.dataUI.picking[self.dataUI.sisFileId][i], self.dataUI.picking[self.dataUI.sisFileId][i]], [i-0.5, i+0.5],color='g')
+                i += 1
+            if not(self.dataUI.animationPicking.first):
+                axMain.set_xlim(left=limitsX[0],right=limitsX[1])
+                axMain.set_ylim(bottom=limitsY[0],top=limitsY[1])
+            self.dataUI.animationPicking.first=False
+            self.dataUI.animationPicking.changedSelect = False
+        return 0
+    
+    ## UI objects definition
     def _openGeometry(self):
         self.statusBar.showMessage('Openning Geometry file . . .')
         ## Opening the geometry file:
@@ -235,18 +330,29 @@ class Window(QMainWindow):
             _, ext = os.path.splitext(name)
             if ext == '.segy' or ext == '.sgy':
                 st = read(os.path.join(path,name), 'SEGY')
+                self.dataUI.beginTime = 0
             elif ext == '.seg2' or ext == '.sg2':
                 st = read(os.path.join(path,name), 'SEG2')
+                self.dataUI.beginTime = float(st[0].stats.seg2["DELAY"])
             else:
                 st = read(os.path.join(path,name), 'SEG2')
+                self.dataUI.beginTime = float(st[0].stats.seg2["DELAY"])
             if len(st) != len(ReceiversPosition): # If the number of geophones does not match between the loaded array and the gemoetry
                 raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
             self.dataUI.sisData.append(st)
+        
+        self.dataUI.picking = [[None]*len(self.dataUI.sisData[0])]*len(SEG2Files)       
 
     def updateTab(self):
         self.comboBoxFilesPicking.clear()
         for name in self.dataUI.paths.seg2Files:
             self.comboBoxFilesPicking.addItem(name)
+        self.dataUI.sisFileId = 0
+        self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
+        self.mainGraph.mpl_connect('key_press_event', self.onKey)
+        self.mainGraph.mpl_connect('button_press_event', self.onPress)
+        self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+        self.ani = animation.FuncAnimation(self.mainGraph.fig, self.animationZoom, interval=10, blit=True)
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
@@ -282,7 +388,8 @@ class Window(QMainWindow):
         mainGraphLayout.addWidget(self.mainGraphToolbar)
         mainGraphLayout.addWidget(self.mainGraph)
         layout.addLayout(mainGraphLayout,2,0,9,10)
-        # self.mainGraph.
+        
+        # self.mainGraph.connect
 
         ## Zoom graph with the current trace
         self.zoomGraph = MplCanvas(importTab, width=5, height=4, dpi=100)
