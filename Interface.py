@@ -37,6 +37,7 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QPushButton,
     QTextEdit)
+from PyQt5.QtCore import Qt
 
 defaultStatus = "Idle."
 
@@ -47,6 +48,7 @@ class MplCanvas(FigureCanvasQTAgg):
         self.axes = self.fig.add_subplot(111)
         self.fig.tight_layout()
         super(MplCanvas, self).__init__(self.fig)
+        self.setParent(parent)
 class paths():
     def __init__(self) -> None:
         self.directory = []
@@ -171,19 +173,21 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.mousePosition = event.xdata
         return 0
 
-    def onKey(self, event):
-        global changedSelect, currSelect
-        if event.key == "up": # Change i += 1
-            self.dataUI.animationPicking.currSelect += 1
-            if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
-                self.dataUI.animationPicking.currSelect = 0
-            self.dataUI.animationPicking.changedSelect = True
-        elif event.key == "down": # Change i -= 1
-            self.dataUI.animationPicking.currSelect -= 1
-            if self.dataUI.animationPicking.currSelect < 0:
-                self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
-            self.dataUI.animationPicking.changedSelect = True    
-        return 0
+    def keyPressEvent(self, event):
+        if self.tabs.currentIndex() == 0: # Only used if the key is pressed in the first tab
+            if event.key() == Qt.Key_Up: # Change i += 1
+                self.dataUI.animationPicking.currSelect += 1
+                if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
+                    self.dataUI.animationPicking.currSelect = 0
+                self.dataUI.animationPicking.changedSelect = True
+            elif event.key() == Qt.Key_Down: # Change i -= 1
+                self.dataUI.animationPicking.currSelect -= 1
+                if self.dataUI.animationPicking.currSelect < 0:
+                    self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
+                self.dataUI.animationPicking.changedSelect = True    
+            event.accept()
+        else:
+            event.ignore()
     
     def onPress(self, event):
         if event.button == 1:
@@ -198,7 +202,6 @@ class Window(QMainWindow):
     
     def animationZoom(self, i):
         axZoom = self.zoomGraph.axes
-        axMain = self.mainGraph.axes
         # Get axis variables
         deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
         nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
@@ -224,6 +227,15 @@ class Window(QMainWindow):
             right=False,
             labelleft=False,
             labelbottom=False) # labels along the bottom edge are off
+        self.zoomGraph.draw()
+        return 0
+    
+    def animationMain(self, i):
+        axMain = self.mainGraph.axes
+        # Get axis variables
+        deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
+        nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
+        timeSEG2 = np.arange(self.dataUI.beginTime, self.dataUI.beginTime+nbPoints*deltaT, deltaT)
         if self.dataUI.animationPicking.changedSelect:
             # Change red graph + pick
             if not(self.dataUI.animationPicking.first):
@@ -246,6 +258,7 @@ class Window(QMainWindow):
                 axMain.set_ylim(bottom=limitsY[0],top=limitsY[1])
             self.dataUI.animationPicking.first=False
             self.dataUI.animationPicking.changedSelect = False
+        self.mainGraph.draw()
         return 0
     
     ## UI objects definition
@@ -256,7 +269,7 @@ class Window(QMainWindow):
         headTail = os.path.split(fname)
         path = headTail[0]
         file = headTail[1]
-        nameSave = file[:-9] # remove the *.geometry
+        # nameSave = file[:-9] # remove the *.geometry
         # Retreive the datafiles names:
         SEG2Files = []
         SourcePosition = []
@@ -311,7 +324,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
         
         ## Return to the picking tab
-        self.updateTab()
+        self.updateTab0()
         self.tabs.setCurrentIndex(0)
 
     def saveDataUI(self, path, file, SEG2Files, ReceiversPosition, sensors, sourcesId):
@@ -343,16 +356,19 @@ class Window(QMainWindow):
         
         self.dataUI.picking = [[None]*len(self.dataUI.sisData[0])]*len(SEG2Files)       
 
-    def updateTab(self):
+    def updateTab0(self):
         self.comboBoxFilesPicking.clear()
         for name in self.dataUI.paths.seg2Files:
             self.comboBoxFilesPicking.addItem(name)
         self.dataUI.sisFileId = 0
         self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
-        self.mainGraph.mpl_connect('key_press_event', self.onKey)
+        # self.mainGraph.mpl_connect('key_press_event', self.onKey)
         self.mainGraph.mpl_connect('button_press_event', self.onPress)
         self.mainGraph.mpl_connect('button_release_event', self.onRelease)
-        self.ani = animation.FuncAnimation(self.mainGraph.fig, self.animationZoom, interval=10, blit=True)
+        self.aniMain = animation.FuncAnimation(self.mainGraph.fig, self.animationMain, interval=16.7)
+        self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7)
+        self.mainGraph.draw()
+        self.zoomGraph.draw()
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
@@ -381,7 +397,7 @@ class Window(QMainWindow):
 
         ## Main graph with all the traces
         self.mainGraph = MplCanvas(importTab, width=8, height=7, dpi=100)
-        self.mainGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40])
+        self.mainGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40], animated=True)
         # plt.tight_layout()
         self.mainGraphToolbar = NavigationToolbar2QT(self.mainGraph, importTab)
         mainGraphLayout = QVBoxLayout()
@@ -393,7 +409,7 @@ class Window(QMainWindow):
 
         ## Zoom graph with the current trace
         self.zoomGraph = MplCanvas(importTab, width=5, height=4, dpi=100)
-        self.zoomGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40])
+        self.zoomGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40], animated=True)
         self.zoomGraph.axes.tick_params(
                 axis='both',       # changes apply to the x-axis
                 which='both',      # both major and minor ticks are affected
@@ -404,6 +420,8 @@ class Window(QMainWindow):
                 labelleft=False,
                 labelbottom=False) # labels along the bottom edge are off
         # plt.tight_layout()
+        self.aniMain = None
+        self.aniZoom = None
         layout.addWidget(self.zoomGraph,2,10,5,5)
         layout.addWidget(QTextEdit(),7,10,2,5)
         layout.addWidget(QPushButton('Option 1'),9,10,1,5)
