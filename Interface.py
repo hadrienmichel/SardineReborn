@@ -168,11 +168,7 @@ class Window(QMainWindow):
             event.ignore()
         
     ## Animations definitions:
-    def changeMouse(self, event):
-        if event.inaxes is not None:
-            self.dataUI.animationPicking.mousePosition = event.xdata
-        return 0
-
+    # PyQt5 animations
     def keyPressEvent(self, event):
         if self.tabs.currentIndex() == 0: # Only used if the key is pressed in the first tab
             if event.key() == Qt.Key_Up: # Change i += 1
@@ -189,6 +185,12 @@ class Window(QMainWindow):
         else:
             event.ignore()
     
+    # Matplotlib animations:
+    def changeMouse(self, event):
+        if event.inaxes is not None:
+            self.dataUI.animationPicking.mousePosition = event.xdata
+        return 0
+
     def onPress(self, event):
         if event.button == 1:
             self.dataUI.animationPicking.timeOnClick = time.time()
@@ -361,6 +363,7 @@ class Window(QMainWindow):
         for name in self.dataUI.paths.seg2Files:
             self.comboBoxFilesPicking.addItem(name)
         self.dataUI.sisFileId = 0
+        self.comboBoxFilesPicking.currentIndexChanged.connect(self.comboBoxChange)
         self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
         # self.mainGraph.mpl_connect('key_press_event', self.onKey)
         self.mainGraph.mpl_connect('button_press_event', self.onPress)
@@ -369,6 +372,10 @@ class Window(QMainWindow):
         self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7)
         self.mainGraph.draw()
         self.zoomGraph.draw()
+
+    def comboBoxChange(self, newId):
+        self.dataUI.sisFileId = newId
+        self.dataUI.animationPicking.changedSelect = True
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
