@@ -36,7 +36,9 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QComboBox,
     QPushButton,
-    QTextEdit)
+    QTextEdit,
+    QSpinBox,
+    QLabel)
 from PyQt5.QtCore import Qt
 
 defaultStatus = "Idle."
@@ -169,21 +171,24 @@ class Window(QMainWindow):
         
     ## Animations definitions:
     # PyQt5 animations
-    def keyPressEvent(self, event):
-        if self.tabs.currentIndex() == 0: # Only used if the key is pressed in the first tab
-            if event.key() == Qt.Key_Up: # Change i += 1
-                self.dataUI.animationPicking.currSelect += 1
-                if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
-                    self.dataUI.animationPicking.currSelect = 0
-                self.dataUI.animationPicking.changedSelect = True
-            elif event.key() == Qt.Key_Down: # Change i -= 1
-                self.dataUI.animationPicking.currSelect -= 1
-                if self.dataUI.animationPicking.currSelect < 0:
-                    self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
-                self.dataUI.animationPicking.changedSelect = True    
-            event.accept()
-        else:
-            event.ignore()
+    # def keyPressEvent(self, event):
+    #     if not(self.buttonTabPickingSet.isChecked()):
+    #         if self.tabs.currentIndex() == 0: # Only used if the key is pressed in the first tab
+    #             if event.key() == Qt.Key_Up: # Change i += 1
+    #                 self.dataUI.animationPicking.currSelect += 1
+    #                 if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
+    #                     self.dataUI.animationPicking.currSelect = 0
+    #                 self.dataUI.animationPicking.changedSelect = True
+    #             elif event.key() == Qt.Key_Down: # Change i -= 1
+    #                 self.dataUI.animationPicking.currSelect -= 1
+    #                 if self.dataUI.animationPicking.currSelect < 0:
+    #                     self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
+    #                 self.dataUI.animationPicking.changedSelect = True    
+    #             event.accept()
+    #         else:
+    #             event.ignore()
+    #     else:
+    #         event.ignore()
     
     # Matplotlib animations:
     def changeMouse(self, event):
@@ -198,7 +203,10 @@ class Window(QMainWindow):
 
     def onRelease(self, event):
         if event.button == 1 and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
-            self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
+            if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
+                self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+            else:
+                self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
             self.dataUI.animationPicking.changedSelect = True
         return 0
     
@@ -217,8 +225,8 @@ class Window(QMainWindow):
         axZoom.autoscale(axis='y')
         z = axZoom.get_ylim()
         axZoom.plot([self.dataUI.animationPicking.mousePosition, self.dataUI.animationPicking.mousePosition],z,color='r')
-        if self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect] is not None:
-            axZoom.plot([self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect], self.dataUI.picking[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect]], z,color='g')
+        if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
+            axZoom.plot([self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect], self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect]], z,color='g')
         axZoom.set_frame_on(False)
         axZoom.tick_params(
             axis='both',       # changes apply to the x-axis
@@ -252,8 +260,8 @@ class Window(QMainWindow):
                     axMain.plot(timeSEG2,data,color='r')
                 else:
                     axMain.plot(timeSEG2,data,color='k')
-                if self.dataUI.picking[self.dataUI.sisFileId][i] is not None:
-                    axMain.plot([self.dataUI.picking[self.dataUI.sisFileId][i], self.dataUI.picking[self.dataUI.sisFileId][i]], [i-0.5, i+0.5],color='g')
+                if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, i])):
+                    axMain.plot([self.dataUI.picking[self.dataUI.sisFileId, i], self.dataUI.picking[self.dataUI.sisFileId, i]], [i-0.5, i+0.5],color='g')
                 i += 1
             if not(self.dataUI.animationPicking.first):
                 axMain.set_xlim(left=limitsX[0],right=limitsX[1])
@@ -356,7 +364,17 @@ class Window(QMainWindow):
                 raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
             self.dataUI.sisData.append(st)
         
-        self.dataUI.picking = [[None]*len(self.dataUI.sisData[0])]*len(SEG2Files)       
+        self.dataUI.picking = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
+        self.dataUI.picking[:] = np.nan
+        self.spinBoxCurrSelect.setMinimum(0)
+        self.spinBoxCurrSelect.setMaximum(len(self.dataUI.sisData[0])-1)
+        self.spinBoxCurrSelect.setPrefix('Trace number ')
+        self.spinBoxCurrSelect.valueChanged.connect(self.traceNumberChanged)
+        self.spinBoxCurrSelect.setEnabled(True)
+    
+    def traceNumberChanged(self, value):
+        self.dataUI.animationPicking.currSelect = value
+        self.dataUI.animationPicking.changedSelect = True
 
     def updateTab0(self):
         self.comboBoxFilesPicking.clear()
@@ -364,10 +382,9 @@ class Window(QMainWindow):
             self.comboBoxFilesPicking.addItem(name)
         self.dataUI.sisFileId = 0
         self.comboBoxFilesPicking.currentIndexChanged.connect(self.comboBoxChange)
-        self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
-        # self.mainGraph.mpl_connect('key_press_event', self.onKey)
-        self.mainGraph.mpl_connect('button_press_event', self.onPress)
-        self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+        self.connectMouse = self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
+        self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
+        self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
         self.aniMain = animation.FuncAnimation(self.mainGraph.fig, self.animationMain, interval=16.7)
         self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7)
         self.mainGraph.draw()
@@ -430,11 +447,48 @@ class Window(QMainWindow):
         self.aniMain = None
         self.aniZoom = None
         layout.addWidget(self.zoomGraph,2,10,5,5)
-        layout.addWidget(QTextEdit(),7,10,2,5)
-        layout.addWidget(QPushButton('Option 1'),9,10,1,5)
-        layout.addWidget(QPushButton('Option 2'),10,10,1,5)
+        self.buttonTabPickingSet = QPushButton('Set picking')
+        self.buttonTabPickingReset = QPushButton('Reset picking')
+        self.spinBoxCurrSelect = QSpinBox(importTab)
+        self.spinBoxCurrSelect.setEnabled(False)
+        textBox = QLabel(importTab)
+        textBox.setText('Select the trace number:')
+        layout.addWidget(textBox,7,10,1,5)
+        layout.addWidget(self.spinBoxCurrSelect,8,10,1,5)
+        layout.addWidget(self.buttonTabPickingSet,9,10,1,5)
+        layout.addWidget(self.buttonTabPickingReset,10,10,1,5)
+        self.buttonTabPickingSet.setCheckable(True)
+        self.buttonTabPickingSet.clicked.connect(self.setPicking)
+        self.buttonTabPickingReset.clicked.connect(self.resetPicking)
         importTab.setLayout(layout)
         return importTab
+    
+    def setPicking(self):
+        if self.dataUI.dataLoaded:
+            if self.buttonTabPickingSet.isChecked():
+                # We stop the animation and gray out the graphs:
+                self.aniZoom.event_source.stop()
+                self.aniMain.event_source.stop()
+                self.mainGraph.mpl_disconnect(self.connectMouse)
+                self.mainGraph.mpl_disconnect(self.connectPress)
+                self.mainGraph.mpl_disconnect(self.connectRelease)
+                self.spinBoxCurrSelect.setEnabled(False)
+            else:
+                # We begin back the animation:
+                self.aniZoom.event_source.start()
+                self.aniMain.event_source.start()
+                self.connectMouse = self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
+                self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
+                self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+                self.spinBoxCurrSelect.setEnabled(True)
+        # event.accept()
+
+    def resetPicking(self):
+        if self.dataUI.dataLoaded:
+            self.dataUI.picking = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
+            self.dataUI.picking[:] = np.nan 
+            self.dataUI.animationPicking.changedSelect = True
+        # event.accept()
 
     def _inversionTabUI(self):
         importTab = QWidget()
