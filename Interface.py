@@ -44,6 +44,7 @@ from PyQt5.QtCore import Qt
 defaultStatus = "Idle."
 
 ## Need to take a closer look at this: https://programmerall.com/article/10751929193/
+# https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
@@ -61,6 +62,7 @@ class geometry():
     def __init__(self) -> None:
         self.sensors = []
         self.sourcesId = []
+        self.receivers = []
 class model():
     def __init__(self) -> None:
         self.nbLayers = 2
@@ -171,24 +173,6 @@ class Window(QMainWindow):
         
     ## Animations definitions:
     # PyQt5 animations
-    # def keyPressEvent(self, event):
-    #     if not(self.buttonTabPickingSet.isChecked()):
-    #         if self.tabs.currentIndex() == 0: # Only used if the key is pressed in the first tab
-    #             if event.key() == Qt.Key_Up: # Change i += 1
-    #                 self.dataUI.animationPicking.currSelect += 1
-    #                 if self.dataUI.animationPicking.currSelect >= len(self.dataUI.sisData[0]):
-    #                     self.dataUI.animationPicking.currSelect = 0
-    #                 self.dataUI.animationPicking.changedSelect = True
-    #             elif event.key() == Qt.Key_Down: # Change i -= 1
-    #                 self.dataUI.animationPicking.currSelect -= 1
-    #                 if self.dataUI.animationPicking.currSelect < 0:
-    #                     self.dataUI.animationPicking.currSelect = len(self.dataUI.sisData[0])-1
-    #                 self.dataUI.animationPicking.changedSelect = True    
-    #             event.accept()
-    #         else:
-    #             event.ignore()
-    #     else:
-    #         event.ignore()
     
     # Matplotlib animations:
     def changeMouse(self, event):
@@ -347,6 +331,7 @@ class Window(QMainWindow):
             ## Setting up the data:
         self.dataUI.geometry.sensors = sensors
         self.dataUI.geometry.sourcesId = sourcesId
+        self.dataUI.geometry.receivers = ReceiversPosition
 
             ## Reading the datasets:
         for name  in SEG2Files:
@@ -396,13 +381,110 @@ class Window(QMainWindow):
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
-        time.sleep(10)
+        ## Building the sgt array:
+        sensors = self.dataUI.geometry.sensors
+        sourcesId = self.dataUI.geometry.sourcesId
+        receivers = self.dataUI.geometry.receivers
+        picksSave = []
+        for nbFile in range(len(self.dataUI.paths.seg2Files)):
+            for i in range(len(self.dataUI.sisData[0])):
+                sId = int(sourcesId[nbFile])
+                rId = int(sensors.index(receivers[i]))
+                t = self.dataUI.picking[nbFile, i]
+                if not(np.isnan(t)):
+                    picksSave.append([sId, rId, t])
+        # Remove unused sensors from the list:
+        usedSensors = [False]*len(sensors)
+        for pick in picksSave:
+            usedSensors[pick[0]] = True
+            usedSensors[pick[1]] = True
+        oldId = range(len(sensors))
+        oldId = [i for i in range(len(sensors)) if usedSensors[i]]
+        sensors = [sensors[i] for i in range(len(sensors)) if usedSensors[i]]
+        newId = range(len(sensors))
+        for pick in picksSave:
+            pick[0] = newId[oldId.index(pick[0])]
+            pick[1] = newId[oldId.index(pick[1])]
+        ## Saving the file:
+        fname, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Source-Receiver-Time file (*.sgt)')# The first argument returned is the filename and path
+        f = open(os.path.join(fname),'w')# Create a new file
+        nbSensors = len(sensors)
+        f.write('%d # shot/geophone points\n' % nbSensors)
+        f.write('#x\ty\n')
+        for i in range(nbSensors):
+            f.write('%.2f\t%.2f\n' % (sensors[i][0], sensors[i][1]))
+        nbMeas = len(picksSave)
+        f.write('%d # measurements\n' % nbMeas)
+        f.write('#s\tg\tt\n')
+        for i in range(nbMeas):
+            f.write('%d\t%d\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, max(0,picksSave[i][2])))
+        f.close()
         self.statusBar.showMessage(defaultStatus)
 
     def _loadPicking(self):
         self.statusBar.showMessage('Loading picking file . . .')
-        time.sleep(10)
-        self.statusBar.showMessage(defaultStatus)
+        # 1) Load a file with the first arrival:
+        fname, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Source-Receiver-Time file (*.sgt)')
+        # We retreived a first-arrival file --> geometry of the sensors + first arrivals 
+        with open(fname) as f:
+            lines = f.read().splitlines()
+        markerNbSensors = "# shot/geophone points"
+        markerMeasurements = "# measurements"
+        for line in lines:
+            if line.endswith(markerNbSensors):
+                nbSensors = int(line[:-len(markerNbSensors)])
+                sensors = np.zeros((nbSensors,2))
+                idxSensor = 0
+            elif line.endswith("#x\ty"):
+                pass
+            elif idxSensor < nbSensors:
+                sensors[idxSensor,:] = re.split(r'\t+', line)
+                idxSensor += 1
+            elif line.endswith(markerMeasurements):
+                nbMeasurements = int(line[:-len(markerMeasurements)])
+                measurements = np.zeros((nbMeasurements,3))
+                idxMeas = 0
+            elif line.endswith('#s\tg\tt'):
+                pass
+            elif idxMeas < nbMeasurements:
+                measurements[idxMeas,:] = re.split(r'\t+', line)
+                idxMeas += 1
+        loadPicking = False
+        if self.dataUI.dataLoaded:
+            # Check if the sgt file corresponds to the already loaded dataset (similar array)
+            sensorsInList = True
+            for i in range(nbSensors):
+                currSensor = sensors[i,:]
+                equals = np.all(self.dataUI.geometry.sensors == currSensor, axis=1)
+                if np.sum(equals) < 1:
+                    # The sensor is not in the list
+                    sensorsInList = False
+                    break
+            if sensorsInList:
+                if not(np.all(np.isnan(self.dataUI.picking))):
+                    # Load the picking to add atop the traces:
+                    reply = QMessageBox.question(self, 'Overwritting picking . . .', 'Are you sure you want to overwrite the current picking?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                    if reply == QMessageBox.Yes:
+                        ## loading the picking:
+                        loadPicking = True
+                    else:
+                        ## Do nothing for the picking window:
+                        loadPicking = False
+                        self.statusBar.showMessage(f'Data loaded but picking not presented')
+                else:
+                    loadPicking = True
+        if loadPicking:
+            sources = np.asarray(self.dataUI.geometry.sensors)
+            sources = sources[list(self.dataUI.geometry.sourcesId.astype(int)), :]
+            receivers = np.asarray(self.dataUI.geometry.receivers)
+            for i in range(nbMeasurements):
+                sCurr = sensors[int(measurements[i,0])-1,:]
+                rCurr = sensors[int(measurements[i,1])-1,:]
+                pickCurr = measurements[i,2]
+                sId = np.where(np.all(sources == sCurr, axis=1))[0]
+                rId = np.where(np.all(receivers == rCurr, axis=1))[0]
+                self.dataUI.picking[sId, rId] = pickCurr
+        self.statusBar.showMessage(f'Data loaded with picking on graphs')
 
     def _saveModel(self):
         self.statusBar.showMessage('Saving current model . . .')
@@ -466,7 +548,7 @@ class Window(QMainWindow):
     def setPicking(self):
         if self.dataUI.dataLoaded:
             if self.buttonTabPickingSet.isChecked():
-                # We stop the animation and gray out the graphs:
+                # We stop the animation:
                 self.aniZoom.event_source.stop()
                 self.aniMain.event_source.stop()
                 self.mainGraph.mpl_disconnect(self.connectMouse)
@@ -481,14 +563,12 @@ class Window(QMainWindow):
                 self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
                 self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
                 self.spinBoxCurrSelect.setEnabled(True)
-        # event.accept()
 
     def resetPicking(self):
         if self.dataUI.dataLoaded:
             self.dataUI.picking = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
             self.dataUI.picking[:] = np.nan 
             self.dataUI.animationPicking.changedSelect = True
-        # event.accept()
 
     def _inversionTabUI(self):
         importTab = QWidget()
