@@ -38,7 +38,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QTextEdit,
     QSpinBox,
-    QLabel)
+    QLabel,
+    QGroupBox)
 from PyQt5.QtCore import Qt
 
 defaultStatus = "Idle."
@@ -420,6 +421,7 @@ class Window(QMainWindow):
             f.write('%d\t%d\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, max(0,picksSave[i][2])))
         f.close()
         self.statusBar.showMessage(defaultStatus)
+        self.filePicksPath.setText(fname)
 
     def _loadPicking(self):
         self.statusBar.showMessage('Loading picking file . . .')
@@ -484,9 +486,12 @@ class Window(QMainWindow):
                 sId = np.where(np.all(sources == sCurr, axis=1))[0]
                 rId = np.where(np.all(receivers == rCurr, axis=1))[0]
                 self.dataUI.picking[sId, rId] = pickCurr
-        self.statusBar.showMessage(f'Data loaded with picking on graphs')
+            self.statusBar.showMessage(f'Data loaded with picking on graphs')
+            self.dataUI.animationPicking.changedSelect = True
+        self.filePicksPath.setText(fname)
 
     def _saveModel(self):
+        # TODO
         self.statusBar.showMessage('Saving current model . . .')
         time.sleep(10)
         self.statusBar.showMessage(defaultStatus)
@@ -504,15 +509,11 @@ class Window(QMainWindow):
         ## Main graph with all the traces
         self.mainGraph = MplCanvas(importTab, width=8, height=7, dpi=100)
         self.mainGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40], animated=True)
-        # plt.tight_layout()
         self.mainGraphToolbar = NavigationToolbar2QT(self.mainGraph, importTab)
         mainGraphLayout = QVBoxLayout()
         mainGraphLayout.addWidget(self.mainGraphToolbar)
         mainGraphLayout.addWidget(self.mainGraph)
         layout.addLayout(mainGraphLayout,2,0,9,10)
-        
-        # self.mainGraph.connect
-
         ## Zoom graph with the current trace
         self.zoomGraph = MplCanvas(importTab, width=5, height=4, dpi=100)
         self.zoomGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40], animated=True)
@@ -525,7 +526,6 @@ class Window(QMainWindow):
                 right=False,
                 labelleft=False,
                 labelbottom=False) # labels along the bottom edge are off
-        # plt.tight_layout()
         self.aniMain = None
         self.aniZoom = None
         layout.addWidget(self.zoomGraph,2,10,5,5)
@@ -571,12 +571,30 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.changedSelect = True
 
     def _inversionTabUI(self):
-        importTab = QWidget()
-        layout = QHBoxLayout()
-        layout.addWidget(QCheckBox('Option 1'))
-        layout.addWidget(QCheckBox('Option 2'))
-        importTab.setLayout(layout)
-        return importTab
+        ## Tab for the inversion of the data using pygimli api.
+        inversionTab = QWidget(self.tabs)
+        layout = QGridLayout(self.tabs)
+
+        ## Selecting the picking file:
+        self.filePicksPath = QLabel('File path', inversionTab)
+        self.filePicksPath.setAlignment(Qt.AlignCenter)
+        self.buttonGetSgtFile = QPushButton('...', inversionTab)
+        self.buttonGetSgtFile.clicked.connect(self._loadPicking)
+        layout.addWidget(self.filePicksPath, 0, 0, 1, 9)
+        layout.addWidget(self.buttonGetSgtFile,0, 9, 1, 1)
+        self.invModelGraph = MplCanvas(inversionTab)
+        layout.addWidget(self.invModelGraph, 1, 0, 5, 5)
+        self.dataGraph = MplCanvas(inversionTab)
+        layout.addWidget(self.dataGraph, 1, 5, 5, 5)
+        self.fitGraph = MplCanvas(inversionTab)
+        layout.addWidget(self.fitGraph, 6, 5, 5, 5)
+        self.groupeOption = QGroupBox(inversionTab)
+        self.groupeOption.setTitle('Inversion options')
+        layout.addWidget(self.groupeOption, 6, 0, 3, 5)
+        self.inversionText = QTextEdit(inversionTab)
+        layout.addWidget(self.inversionText, 9, 0, 2, 5)
+        inversionTab.setLayout(layout)
+        return inversionTab
 
     def _modelTabUI(self):
         importTab = QWidget()
