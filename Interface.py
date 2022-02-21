@@ -20,6 +20,9 @@ from matplotlib.figure import Figure
 from obspy import read
 ## Imports for the data inversion
 import pygimli as pg
+from pygimli.physics import TravelTimeManager as TTMgr
+from pygimli.physics.traveltime import ratools
+from pygimli.viewer import show as pgshow
 ## Imports for the GUI
 from PyQt5.QtWidgets import (
     QApplication,  
@@ -36,11 +39,12 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QComboBox,
     QPushButton,
-    QTextEdit,
     QSpinBox,
     QLabel,
-    QGroupBox)
+    QGroupBox,
+    QLineEdit)
 from PyQt5.QtCore import Qt
+from PyQt5 import QtGui
 
 defaultStatus = "Idle."
 
@@ -84,6 +88,23 @@ class animationPicking():
         self.changedSelect = True   # Variable to tell if the trace selected is different
         self.first = True           # Variable to tell if plotting for the first time
         self.maxClickLength = 0.5   # Maximum time (in sec) to consider a click on place
+class inversionData():
+    def __init__(self) -> None:
+        self.lam = 20.0
+        self.zWeight = 0.5
+        self.vTop = 500.0
+        self.vBottom = 3000.0
+        self.vMin = 10.0
+        self.vMax = 5000.0
+        self.startModel = None
+        self.meshMaxCellSize = 5.0
+        self.meshDepthMax = 50.0
+        # Pygimli inversion features:
+        self.mesh = None
+        self.data = None
+        self.manager = None
+    def setStartModelGradient(self, data, mesh):
+        self.startModel = ratools.createGradientModel2D(data, mesh, self.vTop, self.vBottom)
 class dataStorage():
     def __init__(self) -> None:
         ## Data variables:
@@ -92,6 +113,7 @@ class dataStorage():
         self.sisData = []
         self.picking = []
         self.model = model()
+        self.invData = inversionData()
         ## Status variables:
         self.dataLoaded = False
         self.pickingDone = False
@@ -109,7 +131,7 @@ class Window(QMainWindow):
 
         ## Initialize the UI
         self.setWindowTitle('Sardine Reborn')
-        self.resize(600,350)
+        self.resize(1100,600)
 
         ## Adding tabs to the layout
         self.tabs = QTabWidget(self)
@@ -422,6 +444,7 @@ class Window(QMainWindow):
         f.close()
         self.statusBar.showMessage(defaultStatus)
         self.filePicksPath.setText(fname)
+        self._initPygimli(fname)
 
     def _loadPicking(self):
         self.statusBar.showMessage('Loading picking file . . .')
@@ -489,6 +512,14 @@ class Window(QMainWindow):
             self.statusBar.showMessage(f'Data loaded with picking on graphs')
             self.dataUI.animationPicking.changedSelect = True
         self.filePicksPath.setText(fname)
+        self._initPygimli(fname)
+    
+    def _initPygimli(self, fname):
+        ## Preparing inversion of data (pygimli)
+        self.dataUI.invData.data = pg.DataContainer(fname)
+        self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
+        self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
+        pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
 
     def _saveModel(self):
         # TODO
@@ -590,11 +621,94 @@ class Window(QMainWindow):
         layout.addWidget(self.fitGraph, 6, 5, 5, 5)
         self.groupeOption = QGroupBox(inversionTab)
         self.groupeOption.setTitle('Inversion options')
-        layout.addWidget(self.groupeOption, 6, 0, 3, 5)
-        self.inversionText = QTextEdit(inversionTab)
-        layout.addWidget(self.inversionText, 9, 0, 2, 5)
+        ## List of inversion options to enable:
+        groupOptionLayout = QGridLayout(self.groupeOption) # Grid of 5 by 4
+        self.setLambda = QLineEdit(str(self.dataUI.invData.lam),self.groupeOption)
+        self.setLambda.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setLambda))
+        lambdaText = QLabel('Lambda :')
+        self.setZWeight = QLineEdit(str(self.dataUI.invData.zWeight),self.groupeOption)
+        self.setZWeight.setValidator(QtGui.QDoubleValidator(0.01, 100.0, 3, self.setZWeight))
+        zWeightText = QLabel('Z-weight (/) :')
+        self.setVTop = QLineEdit(str(self.dataUI.invData.vTop),self.groupeOption)
+        self.setVTop.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVTop))
+        vTopText = QLabel('V<sub>top</sub> (m/s) :')
+        self.setVBottom = QLineEdit(str(self.dataUI.invData.vBottom),self.groupeOption)
+        self.setVBottom.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVBottom))
+        vBottomText = QLabel('V<sub>bottom</sub> (m/s) :')
+        self.loadInitModel = QPushButton('Load Initial Model', self.groupeOption)
+        minVText = QLabel('Min. velocity (m/s) :')
+        self.setVMin = QLineEdit(str(self.dataUI.invData.vMin),self.groupeOption)
+        self.setVMin.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVMin))
+        maxVText = QLabel('Max. velocity (m/s) :')
+        self.setVMax = QLineEdit(str(self.dataUI.invData.vMax),self.groupeOption)
+        self.setVMax.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVMax))
+        maxCellText = QLabel('Mesh max. cell size (m²) :')
+        self.setMaxCell = QLineEdit(str(self.dataUI.invData.meshMaxCellSize),self.groupeOption)
+        self.setMaxCell.setValidator(QtGui.QDoubleValidator(0.1, 100.0, 2, self.setMaxCell))
+        maxDepthText = QLabel('Mesh max. depth (m) :')
+        self.setMaxDepth = QLineEdit(str(self.dataUI.invData.meshDepthMax),self.groupeOption)
+        self.setMaxDepth.setValidator(QtGui.QDoubleValidator(5.0, 1000.0, 2, self.setMaxDepth))
+        self.runInversion = QPushButton('Run inversion', self.groupeOption)
+        groupOptionLayout.addWidget(lambdaText, 0, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setLambda,0, 1, 1, 1)
+        groupOptionLayout.addWidget(zWeightText, 0, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setZWeight, 0, 3, 1, 1)
+        groupOptionLayout.addWidget(vTopText, 1, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setVTop, 1, 1, 1, 1)
+        groupOptionLayout.addWidget(vBottomText, 1, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setVBottom, 1, 3, 1, 1)
+        groupOptionLayout.addWidget(self.loadInitModel, 2, 0, 1, 4)
+        self.loadInitModel.clicked.connect(self._setStartModel)
+        groupOptionLayout.addWidget(minVText, 3, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setVMin, 3, 1, 1, 1)
+        groupOptionLayout.addWidget(maxVText, 3, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setVMax, 3, 3, 1, 1)
+        groupOptionLayout.addWidget(maxCellText, 4, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setMaxCell, 4, 1, 1, 1)
+        groupOptionLayout.addWidget(maxDepthText, 4, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setMaxDepth, 4, 3, 1, 1)
+        groupOptionLayout.addWidget(self.runInversion, 5, 0, 1, 4)
+        self.runInversion.clicked.connect(self._runInversion)
+        self.groupeOption.setLayout(groupOptionLayout)
+        # - Lambda ('lam')
+        # - ReferenceModel --> impossible with the invert method used for TT --> line 422 of inversion.py --> self.inv.setReferenceModel(self.startModel)!
+        # - InitialModel
+        # - ErrorModel
+        # Button for running the inversion
+        layout.addWidget(self.groupeOption, 6, 0, 5, 5)
+        # self.inversionText = QTextEdit(inversionTab)
+        # layout.addWidget(self.inversionText, 10, 0, 1, 5)
         inversionTab.setLayout(layout)
         return inversionTab
+    
+    def _setStartModel(self):
+        pass
+
+    def _runInversion(self):
+        # Parameters for inversion:
+        self.dataUI.invData.lam = float(self.setLambda.text())
+        self.dataUI.invData.zWeight = float(self.setZWeight.text())
+        self.dataUI.invData.vTop = float(self.setVTop.text())
+        self.dataUI.invData.vBottom = float(self.setVBottom.text())
+        # Mesh model and start model:
+        self.dataUI.invData.meshMaxCellSize = float(self.setMaxCell.text())
+        self.dataUI.invData.meshDepthMax = float(self.setMaxDepth.text())
+        if self.dataUI.invData.data is not None:
+            # Creating mesh with mesh parameters:
+            self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
+            self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
+            pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
+            if self.dataUI.invData.startModel is None:
+                self.dataUI.invData.setStartModelGradient(data=self.dataUI.invData.data, mesh=self.dataUI.invData.mesh)
+            # Running the inversion
+            self.dataUI.invData.manager.invert(data = self.dataUI.invData.data,
+                                               mesh = self.dataUI.invData.mesh,
+                                               zWeight = self.dataUI.invData.zWeight,
+                                               lam = self.dataUI.invData.lam,
+                                               startModel = self.dataUI.invData.startModel,
+                                               limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax])
+            self.dataUI.invData.manager.showResults(ax=self.invModelGraph.axes)
+            self.dataUI.invData.manager.drawRayPaths(ax=self.invModelGraph.axes, color='w', lw=0.3, alpha=0.5)
 
     def _modelTabUI(self):
         importTab = QWidget()
