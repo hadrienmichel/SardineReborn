@@ -21,7 +21,7 @@ from obspy import read
 ## Imports for the data inversion
 import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
-from pygimli.physics.traveltime import ratools
+from pygimli.physics.traveltime import ratools, drawFirstPicks
 from pygimli.viewer import show as pgshow
 ## Imports for the GUI
 from PyQt5.QtWidgets import (
@@ -54,7 +54,7 @@ class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
-        self.fig.tight_layout()
+        # self.fig.tight_layout()
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
 class paths():
@@ -516,10 +516,18 @@ class Window(QMainWindow):
     
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
-        self.dataUI.invData.data = pg.DataContainer(fname)
+        self.dataUI.invData.data = pg.DataContainer(fname, sensorTokens='s g')
         self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
         self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
+        self.invModelGraph.axes.clear()
+        self.dataGraph.axes.clear()
+        self.fitGraph.axes.clear()
         pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
+        drawFirstPicks(ax=self.dataGraph.axes, data=self.dataUI.invData.data)
+        self.dataGraph.fig.tight_layout()
+        self.dataGraph.draw()
+        self.invModelGraph.fig.tight_layout()
+        self.invModelGraph.draw()
 
     def _saveModel(self):
         # TODO
@@ -695,7 +703,8 @@ class Window(QMainWindow):
         self.dataUI.invData.meshDepthMax = float(self.setMaxDepth.text())
         if self.dataUI.invData.data is not None:
             # Creating mesh with mesh parameters:
-            self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
+            # self.dataUI.invData.data = pg.DataContainer(self.filePicksPath.text())
+            # self.dataUI.invData.manager = TTMgr(data=self.dataUI.invData.data)
             self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
             pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
             if self.dataUI.invData.startModel is None:
@@ -707,8 +716,18 @@ class Window(QMainWindow):
                                                lam = self.dataUI.invData.lam,
                                                startModel = self.dataUI.invData.startModel,
                                                limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax])
-            self.dataUI.invData.manager.showResults(ax=self.invModelGraph.axes)
+            self.invModelGraph.axes.clear()
+            self.fitGraph.axes.clear()
+            drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response))), )
+            # drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.asarray(self.dataUI.invData.manager.inv.response))
+            self.fitGraph.axes.set_xlabel('x (m)')
+            self.fitGraph.axes.set_ylabel('Data misfit (s)')
+            self.fitGraph.fig.tight_layout()
+            self.fitGraph.draw()
+            self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cmap='cividis')
             self.dataUI.invData.manager.drawRayPaths(ax=self.invModelGraph.axes, color='w', lw=0.3, alpha=0.5)
+            self.invModelGraph.fig.tight_layout()
+            self.invModelGraph.draw()
 
     def _modelTabUI(self):
         importTab = QWidget()
