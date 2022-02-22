@@ -16,6 +16,7 @@ NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'
                                   ('Save', 'Save the figure', 'filesave', 'save_figure')]
 from matplotlib import animation
 from matplotlib.figure import Figure
+from matplotlib.backend_bases import MouseButton
 ## Imports for the seismic data input
 from obspy import read
 ## Imports for the data inversion
@@ -50,6 +51,7 @@ defaultStatus = "Idle."
 
 ## Need to take a closer look at this: https://programmerall.com/article/10751929193/
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
+# https://build-system.fman.io/ (for building into executable)
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
@@ -115,6 +117,7 @@ class dataStorage():
         self.geometry = geometry()
         self.sisData = []
         self.picking = []
+        self.pickingError = []
         self.model = model()
         self.invData = inversionData()
         ## Status variables:
@@ -194,6 +197,7 @@ class Window(QMainWindow):
         reply = QMessageBox.question(self, 'Closing ...', 'Are you sure you want to quit?', QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
         if reply == QMessageBox.Ok:
             event.accept()
+            matplotlib.pyplot.close('all') # To get rid of the figure openning after the closing.
         else:
             event.ignore()
         
@@ -207,17 +211,24 @@ class Window(QMainWindow):
         return 0
 
     def onPress(self, event):
-        if event.button == 1:
+        if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
         return 0
 
     def onRelease(self, event):
-        if event.button == 1 and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
+        if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
             if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
                 self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
             else:
                 self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
+                self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition*0.03 # Default error is 3%
             self.dataUI.animationPicking.changedSelect = True
+        if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
+            if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
+                if self.dataUI.animationPicking.mousePosition > 0:
+                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.abs(self.dataUI.animationPicking.mousePosition-self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])/self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] # Default error is 3%
+                    self.dataUI.animationPicking.changedSelect = True
         return 0
     
     def animationZoom(self, i):
@@ -235,8 +246,12 @@ class Window(QMainWindow):
         axZoom.autoscale(axis='y')
         z = axZoom.get_ylim()
         axZoom.plot([self.dataUI.animationPicking.mousePosition, self.dataUI.animationPicking.mousePosition],z,color='r')
-        if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
-            axZoom.plot([self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect], self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect]], z,color='g')
+        currPicking = self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect]
+        if not(np.isnan(currPicking)):
+            currError = self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] * currPicking
+            axZoom.plot([currPicking, currPicking], z, 'g')
+            axZoom.plot([currPicking - currError, currPicking - currError], z, ':g')
+            axZoom.plot([currPicking + currError, currPicking + currError], z, ':g')
         axZoom.set_frame_on(False)
         axZoom.tick_params(
             axis='both',       # changes apply to the x-axis
@@ -270,8 +285,13 @@ class Window(QMainWindow):
                     axMain.plot(timeSEG2,data,color='r')
                 else:
                     axMain.plot(timeSEG2,data,color='k')
-                if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, i])):
-                    axMain.plot([self.dataUI.picking[self.dataUI.sisFileId, i], self.dataUI.picking[self.dataUI.sisFileId, i]], [i-0.5, i+0.5],color='g')
+                currPicking = self.dataUI.picking[self.dataUI.sisFileId, i]
+                if not(np.isnan(currPicking)):
+                    currError = self.dataUI.pickingError[self.dataUI.sisFileId, i] * currPicking
+                    axMain.plot([currPicking, currPicking], [i-0.5, i+0.5],color='g')
+                    axMain.plot([currPicking - currError, currPicking - currError], [i-0.25, i+0.25], ':g')
+                    axMain.plot([currPicking + currError, currPicking + currError], [i-0.25, i+0.25], ':g')
+
                 i += 1
             if not(self.dataUI.animationPicking.first):
                 axMain.set_xlim(left=limitsX[0],right=limitsX[1])
@@ -377,6 +397,8 @@ class Window(QMainWindow):
         
         self.dataUI.picking = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
         self.dataUI.picking[:] = np.nan
+        self.dataUI.pickingError = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
+        self.dataUI.pickingError[:] = np.nan
         self.spinBoxCurrSelect.setMinimum(0)
         self.spinBoxCurrSelect.setMaximum(len(self.dataUI.sisData[0])-1)
         self.spinBoxCurrSelect.setPrefix('Trace number ')
@@ -418,8 +440,9 @@ class Window(QMainWindow):
                 rId = int(sensors.index(receivers[i]))
                 if sId != rId: # The traveltime for source = receiever is 0 and not usefull for inversion!
                     t = self.dataUI.picking[nbFile, i]
+                    err = self.dataUI.pickingError[nbFile, i] * t
                     if not(np.isnan(t)):
-                        picksSave.append([sId, rId, t])
+                        picksSave.append([sId, rId, t, err])
         # Remove unused sensors from the list:
         usedSensors = [False]*len(sensors)
         for pick in picksSave:
@@ -442,9 +465,9 @@ class Window(QMainWindow):
             f.write('%.2f\t%.2f\n' % (sensors[i][0], sensors[i][1]))
         nbMeas = len(picksSave)
         f.write('%d # measurements\n' % nbMeas)
-        f.write('#s\tg\tt\n')
+        f.write('#s\tg\tt\terr\n')
         for i in range(nbMeas):
-            f.write('%d\t%d\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, max(0,picksSave[i][2])))
+            f.write('%d\t%d\t%f\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]))
         f.close()
         self.statusBar.showMessage(defaultStatus)
         self.filePicksPath.setText(fname)
@@ -471,10 +494,12 @@ class Window(QMainWindow):
                 idxSensor += 1
             elif line.endswith(markerMeasurements):
                 nbMeasurements = int(line[:-len(markerMeasurements)])
-                measurements = np.zeros((nbMeasurements,3))
+                measurements = np.zeros((nbMeasurements,4)) # s g t err
                 idxMeas = 0
+            elif line.endswith('#s\tg\tt\terr'):
+                measurements = np.zeros((nbMeasurements,4)) # s g t err
             elif line.endswith('#s\tg\tt'):
-                pass
+                measurements = np.zeros((nbMeasurements,3)) # s g t
             elif idxMeas < nbMeasurements:
                 measurements[idxMeas,:] = re.split(r'\t+', line)
                 idxMeas += 1
@@ -506,13 +531,21 @@ class Window(QMainWindow):
             sources = np.asarray(self.dataUI.geometry.sensors)
             sources = sources[list(self.dataUI.geometry.sourcesId.astype(int)), :]
             receivers = np.asarray(self.dataUI.geometry.receivers)
+            self.dataUI.pickingError[:] = np.nan
+            self.dataUI.picking[:] = np.nan
             for i in range(nbMeasurements):
                 sCurr = sensors[int(measurements[i,0])-1,:]
                 rCurr = sensors[int(measurements[i,1])-1,:]
                 pickCurr = measurements[i,2]
+                if len(measurements[i,:]) > 3:
+                    errCurr = measurements[i,3]
                 sId = np.where(np.all(sources == sCurr, axis=1))[0]
                 rId = np.where(np.all(receivers == rCurr, axis=1))[0]
                 self.dataUI.picking[sId, rId] = pickCurr
+                if len(measurements[i,:]) > 3:
+                    self.dataUI.pickingError[sId, rId] = errCurr/pickCurr
+                else:
+                    self.dataUI.pickingError[sId, rId] = 0.03
             self.statusBar.showMessage(f'Data loaded with picking on graphs')
             self.dataUI.animationPicking.changedSelect = True
         self.filePicksPath.setText(fname)
@@ -733,7 +766,8 @@ class Window(QMainWindow):
                                                zWeight = self.dataUI.invData.zWeight,
                                                lam = self.dataUI.invData.lam,
                                                startModel = self.dataUI.invData.startModel,
-                                               limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax])
+                                               limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax],
+                                               verbose = True)
             self.invModelGraph.axes.clear()
             self.fitGraph.axes.clear()
             drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response))), )
