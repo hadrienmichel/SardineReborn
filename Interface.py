@@ -137,6 +137,7 @@ class Window(QMainWindow):
 
         ## Initialize the UI
         self.setWindowTitle('Sardine Reborn')
+        self.setWindowIcon(QtGui.QIcon('SardineRebornLogo.png'))
         self.resize(1100,600)
 
         ## Adding tabs to the layout
@@ -186,7 +187,7 @@ class Window(QMainWindow):
     ## Oppening and closing message boxes:
     def showEvent(self, event):
         msgBox = QMessageBox(self)
-        msgBox.setIcon(QMessageBox.Information)
+        msgBox.setIconPixmap(QtGui.QPixmap('SardineRebornLogo.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
         msgBox.setText('Welcome to Sardine Reborn!')
         msgBox.setInformativeText('by Hadrien Michel (2022)')
         msgBox.setWindowTitle('Welcome!')
@@ -767,7 +768,8 @@ class Window(QMainWindow):
                                                lam = self.dataUI.invData.lam,
                                                startModel = self.dataUI.invData.startModel,
                                                limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax],
-                                               verbose = True)
+                                               verbose = True,
+                                               chi1 = True)
             self.invModelGraph.axes.clear()
             self.fitGraph.axes.clear()
             drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response))), )
@@ -782,6 +784,10 @@ class Window(QMainWindow):
             self.invModelGraph.draw()
 
     def _modelTabUI(self):
+        '''In this tab , we will propose to draw the odochrones on top
+         of the picking and build the corresponding layered model.
+        Those models are build using the intercept time-method.
+        '''
         modellingTab = QWidget()
         layout = QHBoxLayout()
         layout.addWidget(QCheckBox('Option 1'))
