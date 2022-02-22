@@ -57,6 +57,9 @@ class MplCanvas(FigureCanvasQTAgg):
         # self.fig.tight_layout()
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
+# class VerticalNavigationToolbar2QT(NavigationToolbar2QT):
+#     def __init__(self, canvas, parent, coordinates=True):
+#         super().__init__(canvas, parent, coordinates)
 class paths():
     def __init__(self) -> None:
         self.directory = []
@@ -413,9 +416,10 @@ class Window(QMainWindow):
             for i in range(len(self.dataUI.sisData[0])):
                 sId = int(sourcesId[nbFile])
                 rId = int(sensors.index(receivers[i]))
-                t = self.dataUI.picking[nbFile, i]
-                if not(np.isnan(t)):
-                    picksSave.append([sId, rId, t])
+                if sId != rId: # The traveltime for source = receiever is 0 and not usefull for inversion!
+                    t = self.dataUI.picking[nbFile, i]
+                    if not(np.isnan(t)):
+                        picksSave.append([sId, rId, t])
         # Remove unused sensors from the list:
         usedSensors = [False]*len(sensors)
         for pick in picksSave:
@@ -622,11 +626,23 @@ class Window(QMainWindow):
         layout.addWidget(self.filePicksPath, 0, 0, 1, 9)
         layout.addWidget(self.buttonGetSgtFile,0, 9, 1, 1)
         self.invModelGraph = MplCanvas(inversionTab)
-        layout.addWidget(self.invModelGraph, 1, 0, 5, 5)
+        invModelGraphToolbar = NavigationToolbar2QT(self.invModelGraph, inversionTab)
+        invModelGraphLayout = QVBoxLayout()
+        invModelGraphLayout.addWidget(invModelGraphToolbar)
+        invModelGraphLayout.addWidget(self.invModelGraph)
+        layout.addLayout(invModelGraphLayout, 1, 0, 5, 5)
         self.dataGraph = MplCanvas(inversionTab)
-        layout.addWidget(self.dataGraph, 1, 5, 5, 5)
+        dataGraphToolbar = NavigationToolbar2QT(self.dataGraph, inversionTab)
+        dataGraphLayout = QVBoxLayout()
+        dataGraphLayout.addWidget(dataGraphToolbar)
+        dataGraphLayout.addWidget(self.dataGraph)
+        layout.addLayout(dataGraphLayout, 1, 5, 5, 5)
         self.fitGraph = MplCanvas(inversionTab)
-        layout.addWidget(self.fitGraph, 6, 5, 5, 5)
+        fitGraphToolbar = NavigationToolbar2QT(self.fitGraph, inversionTab)
+        fitGraphLayout = QVBoxLayout()
+        fitGraphLayout.addWidget(self.fitGraph)
+        fitGraphLayout.addWidget(fitGraphToolbar)
+        layout.addLayout(fitGraphLayout, 6, 5, 5, 5)
         self.groupeOption = QGroupBox(inversionTab)
         self.groupeOption.setTitle('Inversion options')
         ## List of inversion options to enable:
@@ -698,6 +714,8 @@ class Window(QMainWindow):
         self.dataUI.invData.zWeight = float(self.setZWeight.text())
         self.dataUI.invData.vTop = float(self.setVTop.text())
         self.dataUI.invData.vBottom = float(self.setVBottom.text())
+        self.dataUI.invData.vMin = float(self.setVMin.text())
+        self.dataUI.invData.vMax = float(self.setVMax.text())
         # Mesh model and start model:
         self.dataUI.invData.meshMaxCellSize = float(self.setMaxCell.text())
         self.dataUI.invData.meshDepthMax = float(self.setMaxDepth.text())
@@ -724,18 +742,18 @@ class Window(QMainWindow):
             self.fitGraph.axes.set_ylabel('Data misfit (s)')
             self.fitGraph.fig.tight_layout()
             self.fitGraph.draw()
-            self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cmap='cividis')
+            self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cMap='cividis')
             self.dataUI.invData.manager.drawRayPaths(ax=self.invModelGraph.axes, color='w', lw=0.3, alpha=0.5)
             self.invModelGraph.fig.tight_layout()
             self.invModelGraph.draw()
 
     def _modelTabUI(self):
-        importTab = QWidget()
+        modellingTab = QWidget()
         layout = QHBoxLayout()
         layout.addWidget(QCheckBox('Option 1'))
         layout.addWidget(QCheckBox('Option 2'))
-        importTab.setLayout(layout)
-        return importTab
+        modellingTab.setLayout(layout)
+        return modellingTab
         
 
 if __name__ == '__main__':
