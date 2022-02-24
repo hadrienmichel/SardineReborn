@@ -23,16 +23,16 @@ if __name__ == '__main__':
     root.destroy()
     # Parameters:
     lambdaParam = 10 # Smoothing the model
-    depthMax = 50 # Forcing a given depth to the model
-    maxCellSize = 2.5 # Forcing a given size for the mesh cells
-    zWeightParam = 0.1 # Forcing Horizontal features in the model (smaller than 1) or vertical (larger than 1)
+    depthMax = 25 # Forcing a given depth to the model
+    maxCellSize = 0.5 # Forcing a given size for the mesh cells
+    zWeightParam = 0.01 # Forcing Horizontal features in the model (smaller than 1) or vertical (larger than 1)
     # Inversion:
-    dataTT = pg.DataContainer(filename, 's g t')
+    dataTT = pg.DataContainer(filename, sensorTokens='s g')
     print(dataTT)
     mgr = TTMgr(data=dataTT)
     meshTT = mgr.createMesh(data=dataTT, paraMaxCellSize=maxCellSize, paraDepth=depthMax)
     # mgr.fw.fop.setStartModel(pg.Vector(mgr.fop.regionManager().parameterCount(), 1))
-    mgr.invert(data=dataTT, mesh= meshTT, zWeight=zWeightParam, lam=lambdaParam, startModel=pg.Vector(meshTT.cellCount(), 1), verbose=True)
+    mgr.invert(data=dataTT, mesh= meshTT, zWeight=zWeightParam, lam=lambdaParam, startModel=pg.Vector(meshTT.cellCount(), 0.0005),verbose=True)#startModel=pg.Vector(meshTT.cellCount(), 0.001),
     ax,cbar = mgr.showResult(logScale=True)
     mgr.drawRayPaths(ax=ax, color='w', lw=0.3, alpha=0.5)
     plt.show()

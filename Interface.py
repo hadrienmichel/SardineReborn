@@ -53,12 +53,13 @@ defaultStatus = "Idle."
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
 # https://build-system.fman.io/ (for building into executable)
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
+    def __init__(self, parent=None, width=5, height=4, dpi=75):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
-        # self.fig.tight_layout()
+        self.cBar = None # For the (eventual) colorbar
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
+
 # class VerticalNavigationToolbar2QT(NavigationToolbar2QT):
 #     def __init__(self, canvas, parent, coordinates=True):
 #         super().__init__(canvas, parent, coordinates)
@@ -109,7 +110,20 @@ class inversionData():
         self.data = None
         self.manager = None
     def setStartModelGradient(self, data, mesh):
-        self.startModel = ratools.createGradientModel2D(data, mesh, self.vTop, self.vBottom)
+        self.startModel = pg.Vector(ratools.createGradientModel2D(data, mesh, self.vTop, self.vBottom))
+class modellingAnimation():
+    def __init__(self) -> None:
+        self.drawingLine = False
+        self.movingPoint = False
+        self.currPosition = [0, 0]
+        self.maxClickLength = 0.5
+class modellingData():
+    def __init__(self) -> None:
+        self.hodo = []
+        self.model = []
+        self.nbLayers = []
+        self.appVelocities = []
+        self.interceptTime = []
 class dataStorage():
     def __init__(self) -> None:
         ## Data variables:
@@ -551,6 +565,7 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.changedSelect = True
         self.filePicksPath.setText(fname)
         self._initPygimli(fname)
+        self._initModelling(sensors, measurements)
     
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
@@ -566,6 +581,10 @@ class Window(QMainWindow):
         self.dataGraph.draw()
         self.invModelGraph.fig.tight_layout()
         self.invModelGraph.draw()
+
+    def _initModelling(self, sensors, measurements):
+        
+        pass
 
     def _saveModel(self):
         # TODO
@@ -668,14 +687,14 @@ class Window(QMainWindow):
         self.dataGraph = MplCanvas(inversionTab)
         dataGraphToolbar = NavigationToolbar2QT(self.dataGraph, inversionTab)
         dataGraphLayout = QVBoxLayout()
-        dataGraphLayout.addWidget(dataGraphToolbar)
+        dataGraphLayout.addWidget(dataGraphToolbar, alignment=Qt.AlignRight)
         dataGraphLayout.addWidget(self.dataGraph)
         layout.addLayout(dataGraphLayout, 1, 5, 5, 5)
         self.fitGraph = MplCanvas(inversionTab)
         fitGraphToolbar = NavigationToolbar2QT(self.fitGraph, inversionTab)
         fitGraphLayout = QVBoxLayout()
         fitGraphLayout.addWidget(self.fitGraph)
-        fitGraphLayout.addWidget(fitGraphToolbar)
+        fitGraphLayout.addWidget(fitGraphToolbar, alignment=Qt.AlignRight)
         layout.addLayout(fitGraphLayout, 6, 5, 5, 5)
         self.groupeOption = QGroupBox(inversionTab)
         self.groupeOption.setTitle('Inversion options')
@@ -693,7 +712,7 @@ class Window(QMainWindow):
         self.setVBottom = QLineEdit(str(self.dataUI.invData.vBottom),self.groupeOption)
         self.setVBottom.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVBottom))
         vBottomText = QLabel('V<sub>bottom</sub> (m/s) :')
-        self.loadInitModel = QPushButton('Load Initial Model', self.groupeOption)
+        # self.loadInitModel = QPushButton('Load Initial Model', self.groupeOption)
         minVText = QLabel('Min. velocity (m/s) :')
         self.setVMin = QLineEdit(str(self.dataUI.invData.vMin),self.groupeOption)
         self.setVMin.setValidator(QtGui.QDoubleValidator(0.0, 10000.0, 2, self.setVMin))
@@ -715,17 +734,17 @@ class Window(QMainWindow):
         groupOptionLayout.addWidget(self.setVTop, 1, 1, 1, 1)
         groupOptionLayout.addWidget(vBottomText, 1, 2, 1, 1)
         groupOptionLayout.addWidget(self.setVBottom, 1, 3, 1, 1)
-        groupOptionLayout.addWidget(self.loadInitModel, 2, 0, 1, 4)
-        self.loadInitModel.clicked.connect(self._setStartModel)
-        groupOptionLayout.addWidget(minVText, 3, 0, 1, 1)
-        groupOptionLayout.addWidget(self.setVMin, 3, 1, 1, 1)
-        groupOptionLayout.addWidget(maxVText, 3, 2, 1, 1)
-        groupOptionLayout.addWidget(self.setVMax, 3, 3, 1, 1)
-        groupOptionLayout.addWidget(maxCellText, 4, 0, 1, 1)
-        groupOptionLayout.addWidget(self.setMaxCell, 4, 1, 1, 1)
-        groupOptionLayout.addWidget(maxDepthText, 4, 2, 1, 1)
-        groupOptionLayout.addWidget(self.setMaxDepth, 4, 3, 1, 1)
-        groupOptionLayout.addWidget(self.runInversion, 5, 0, 1, 4)
+        # groupOptionLayout.addWidget(self.loadInitModel, 2, 0, 1, 4)
+        # self.loadInitModel.clicked.connect(self._setStartModel)
+        groupOptionLayout.addWidget(minVText, 2, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setVMin, 2, 1, 1, 1)
+        groupOptionLayout.addWidget(maxVText, 2, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setVMax, 2, 3, 1, 1)
+        groupOptionLayout.addWidget(maxCellText, 3, 0, 1, 1)
+        groupOptionLayout.addWidget(self.setMaxCell, 3, 1, 1, 1)
+        groupOptionLayout.addWidget(maxDepthText, 3, 2, 1, 1)
+        groupOptionLayout.addWidget(self.setMaxDepth, 3, 3, 1, 1)
+        groupOptionLayout.addWidget(self.runInversion, 4, 0, 1, 4)
         self.runInversion.clicked.connect(self._runInversion)
         self.groupeOption.setLayout(groupOptionLayout)
         # - Lambda ('lam')
@@ -739,8 +758,8 @@ class Window(QMainWindow):
         inversionTab.setLayout(layout)
         return inversionTab
     
-    def _setStartModel(self):
-        pass
+    # def _setStartModel(self):
+    #     pass
 
     def _runInversion(self):
         # Parameters for inversion:
@@ -754,13 +773,16 @@ class Window(QMainWindow):
         self.dataUI.invData.meshMaxCellSize = float(self.setMaxCell.text())
         self.dataUI.invData.meshDepthMax = float(self.setMaxDepth.text())
         if self.dataUI.invData.data is not None:
+            if self.dataUI.inversionDone:
+                self.dataUI.invData.manager = TTMgr(data = self.dataUI.invData.data)
             # Creating mesh with mesh parameters:
             # self.dataUI.invData.data = pg.DataContainer(self.filePicksPath.text())
             # self.dataUI.invData.manager = TTMgr(data=self.dataUI.invData.data)
             self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
             pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
-            if self.dataUI.invData.startModel is None:
-                self.dataUI.invData.setStartModelGradient(data=self.dataUI.invData.data, mesh=self.dataUI.invData.mesh)
+            self.invModelGraph.draw()
+            # if (self.dataUI.invData.startModel is None): # and (self.dataUI.invData.startModel.shape()[0]):
+            self.dataUI.invData.setStartModelGradient(data=self.dataUI.invData.data, mesh=self.dataUI.invData.mesh)
             # Running the inversion
             self.dataUI.invData.manager.invert(data = self.dataUI.invData.data,
                                                mesh = self.dataUI.invData.mesh,
@@ -768,33 +790,57 @@ class Window(QMainWindow):
                                                lam = self.dataUI.invData.lam,
                                                startModel = self.dataUI.invData.startModel,
                                                limits = [self.dataUI.invData.vMin, self.dataUI.invData.vMax],
-                                               verbose = True,
-                                               chi1 = True)
-            self.invModelGraph.axes.clear()
-            self.fitGraph.axes.clear()
-            drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response))), )
-            # drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.asarray(self.dataUI.invData.manager.inv.response))
+                                               verbose = False)
+            self.invModelGraph.fig.clear()
+            self.invModelGraph.axes = self.invModelGraph.fig.add_subplot(111)
+            self.fitGraph.axes.cla()
+            drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response)))/np.asarray(self.dataUI.invData.data('t'))*100)
             self.fitGraph.axes.set_xlabel('x (m)')
-            self.fitGraph.axes.set_ylabel('Data misfit (s)')
+            self.fitGraph.axes.set_ylabel('Data misfit (%)')
             self.fitGraph.fig.tight_layout()
             self.fitGraph.draw()
-            self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cMap='cividis')
+            _, cBar = self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cMap='cividis')
+            self.invModelGraph.cBar = cBar
             self.dataUI.invData.manager.drawRayPaths(ax=self.invModelGraph.axes, color='w', lw=0.3, alpha=0.5)
             self.invModelGraph.fig.tight_layout()
             self.invModelGraph.draw()
+            self.dataUI.inversionDone = True
 
     def _modelTabUI(self):
-        '''In this tab , we will propose to draw the odochrones on top
+        '''In this tab , we will propose to draw the hodochrones on top
          of the picking and build the corresponding layered model.
         Those models are build using the intercept time-method.
         '''
         modellingTab = QWidget()
-        layout = QHBoxLayout()
-        layout.addWidget(QCheckBox('Option 1'))
-        layout.addWidget(QCheckBox('Option 2'))
+        # Pick loading
+        self.filePicksPath = QLabel('File path', modellingTab)
+        self.filePicksPath.setAlignment(Qt.AlignCenter)
+        self.buttonGetSgtFile = QPushButton('...', modellingTab)
+        self.buttonGetSgtFile.clicked.connect(self._loadPicking)
+        # Graph with the hodochrones:
+        self.hodochronesGraph = MplCanvas(modellingTab)
+        hodochronesToolbar = NavigationToolbar2QT(self.hodochronesGraph, modellingTab)
+        hodochronesWidget = QVBoxLayout()
+        hodochronesWidget.addWidget(hodochronesToolbar, alignment=Qt.AlignLeft)
+        hodochronesWidget.addWidget(self.hodochronesGraph)
+        # Graph with the model
+        self.modelGraph = MplCanvas(modellingTab)
+        modelToolbar = NavigationToolbar2QT(self.modelGraph, modellingTab)
+        modelWidget = QVBoxLayout()
+        modelWidget.addWidget(modelToolbar, alignment=Qt.AlignRight)
+        modelWidget.addWidget(self.modelGraph)
+        # Options for the tab:
+        self.groupOptionModelling = QGroupBox()
+        self.groupOptionModelling.setTitle('Options')
+        # Setup of the layout:
+        layout = QGridLayout(modellingTab)
+        layout.addWidget(self.filePicksPath, 0, 0, 1, 9)
+        layout.addWidget(self.buttonGetSgtFile,0, 9, 1, 1)
+        layout.addLayout(hodochronesWidget, 1, 0, 7, 5)
+        layout.addLayout(modelWidget, 1, 5, 7, 5)
+        layout.addWidget(self.groupOptionModelling, 9, 0, 2, 10)
         modellingTab.setLayout(layout)
         return modellingTab
-        
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
