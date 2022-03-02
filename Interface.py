@@ -49,6 +49,64 @@ from PyQt5 import QtGui
 
 defaultStatus = "Idle."
 
+def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
+    '''BUILDMODEL is a function that computes a simple optimal model for 
+    a given set of source, receivers and traveltimes.
+    It computes the curvature of the TT and detects breaks in the hodochrones.
+    It serves only as a first guess and should not be used as an optimal model!
+
+    Inputs:
+        - sourceX:
+        - receiversX:
+        - times:
+        - nbLayers (default=2):
+        - orientation (default=1):
+
+    Outputs:
+        - interceptTimes:
+        - apparentVelocities:
+
+    '''
+    # Change the coordinates if requiered and normalize to sourceX = 0:
+    if orientation < 0:
+        receiversX = np.flip(np.abs(receiversX - sourceX))
+        times = np.flip(times)
+    else:
+        receiversX = receiversX - sourceX
+    curvature = np.abs(np.gradient(np.gradient(times, receiversX), receiversX))
+    # Find the highest curvatures in the set:
+    maxCurvIndex = np.sort(np.argpartition(curvature, -(nbLayers-1))[-(nbLayers-1):])
+    maxCurvIndex = np.concatenate(([0], maxCurvIndex, [len(times)-1]))
+    v = np.zeros((nbLayers,))
+    inter = np.zeros((nbLayers,))
+    for i in range(nbLayers):
+        x = receiversX[maxCurvIndex[i] : maxCurvIndex[i+1]]
+        y = times[maxCurvIndex[i] : maxCurvIndex[i+1]]
+        if i == 0:
+            x = x[:, np.newaxis]
+            p = np.linalg.lstsq(x, y)
+            v[i] = 1/p[0][0]
+            inter[i] = 0
+        else:
+            p = np.polyfit(x, y, 1)
+            v[i] = 1/p[0]
+            inter[i] = p[1]
+    return inter, v
+
+def model1D(inter, v):
+    pass
+    h = np.ones((len(v)-1,))
+    for i in np.arange(1, len(v)):
+        iCr = np.arcsin(v[:i]/v[i])
+        tInterp = inter[i]
+        for j in np.arange(i-1):
+            tInterp -= 2*h[j]*np.cos(iCr[j])/v[j]
+        h[i-1] = v[i-1] * tInterp / (2*np.cos(iCr[i-1]))
+    return h, v    
+
+def modelWithSlope(interp, v):
+    pass
+
 ## Need to take a closer look at this: https://programmerall.com/article/10751929193/
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
 # https://build-system.fman.io/ (for building into executable)
@@ -117,11 +175,15 @@ class modellingAnimation():
         self.movingPoint = False
         self.currPosition = [0, 0]
         self.maxClickLength = 0.5
+        self.timeOnClick = 0
+        self.namesSources = []
+        self.namesOrientations = []
 class modellingData():
     def __init__(self) -> None:
-        self.hodo = []
+        self.hodoPoints = []
+        self.combinationSR = []
         self.model = []
-        self.nbLayers = []
+        self.nbLayers = 2
         self.appVelocities = []
         self.interceptTime = []
 class dataStorage():
@@ -134,6 +196,8 @@ class dataStorage():
         self.pickingError = []
         self.model = model()
         self.invData = inversionData()
+        self.modellingAnimation = modellingAnimation()
+        self.modellingData = modellingData()
         ## Status variables:
         self.dataLoaded = False
         self.pickingDone = False
@@ -151,7 +215,7 @@ class Window(QMainWindow):
 
         ## Initialize the UI
         self.setWindowTitle('Sardine Reborn')
-        self.setWindowIcon(QtGui.QIcon('SardineRebornLogo.png'))
+        self.setWindowIcon(QtGui.QIcon('SardineRebornLogo_100ppp.png'))
         self.resize(1100,600)
 
         ## Adding tabs to the layout
@@ -201,7 +265,7 @@ class Window(QMainWindow):
     ## Oppening and closing message boxes:
     def showEvent(self, event):
         msgBox = QMessageBox(self)
-        msgBox.setIconPixmap(QtGui.QPixmap('SardineRebornLogo.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
+        msgBox.setIconPixmap(QtGui.QPixmap('SardineRebornLogo_100ppp.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
         msgBox.setText('Welcome to Sardine Reborn!')
         msgBox.setInformativeText('by Hadrien Michel (2022)')
         msgBox.setWindowTitle('Welcome!')
@@ -224,10 +288,16 @@ class Window(QMainWindow):
         if event.inaxes is not None:
             self.dataUI.animationPicking.mousePosition = event.xdata
         return 0
+    
+    def changeMouseModelling(self, event): # For the modelling window
+        if event.inaxes is not None:
+            self.dataUI.modellingAnimation.currPosition = [event.xdata, event.ydata]
+        return 0
 
-    def onPress(self, event):
+    def onPress(self, event): # For both windows
         if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
+            self.dataUI.modellingAnimation.timeOnClick = time.time()
         return 0
 
     def onRelease(self, event):
@@ -245,6 +315,11 @@ class Window(QMainWindow):
                     self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.abs(self.dataUI.animationPicking.mousePosition-self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])/self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] # Default error is 3%
                     self.dataUI.animationPicking.changedSelect = True
         return 0
+    
+    def onReleaseModelling(self, event):
+        if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.modellingAnimation.timeOnClick) < self.dataUI.modellingAnimation.maxClickLength):
+            # Add point to the list 
+            pass
     
     def animationZoom(self, i):
         axZoom = self.zoomGraph.axes
@@ -583,8 +658,85 @@ class Window(QMainWindow):
         self.invModelGraph.draw()
 
     def _initModelling(self, sensors, measurements):
-        
-        pass
+        if np.all(np.abs(sensors[:,-1]) < 1e-6):
+            # Plotting the hodochrones:
+            self.plotHodochrones(sensors, measurements)
+        else:
+            QMessageBox.warning(self, 'Warning !', 'Impossible to model using the intercept time method!\nNo topography authorized.')
+            return
+        # Initialize the modelling:
+        self.dataUI.modellingData.nbLayers = self.nbLayersSelector.value()
+        self.dataUI.modellingData.hodoPoints = []
+        self.dataUI.modellingData.combinationSR = []
+        # Gather the possible sources and orientations:
+        self.dataUI.modellingAnimation.namesSources = []
+        self.dataUI.modellingAnimation.namesOrientations = []
+        sources = np.unique(measurements[:,0]).astype(int)
+        colors = matplotlib.pyplot.cm.tab10(np.arange(10))
+        xAxisShow = np.linspace(np.min(sensors[:,0]), np.max(sensors[:,0]),1000)
+        axHod = self.hodochronesGraph.axes
+        for i, sId in enumerate(sources):
+            sourceX = sensors[sId-1,0]
+            self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
+            index = measurements[:,0].astype(int) == sId
+            sourceX = sensors[sId-1, 0]
+            receiversX = sensors[measurements[index, 1].astype(int) - 1, 0]
+            times = measurements[index, 2]
+            receiversLeft = receiversX[receiversX < sourceX]
+            receiversRight = receiversX[receiversX > sourceX]
+            orientations = []
+            if receiversLeft.size != 0:
+                orientations.append('Left')
+                self.dataUI.modellingData.combinationSR.append([sourceX, -1])
+                inter, v = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
+                h, v = model1D(inter, v)
+                for j in range(self.dataUI.modellingData.nbLayers):
+                    xLeft = xAxisShow[xAxisShow <= sourceX]
+                    times = inter[j] + (1/v[j])*np.abs(xLeft-sourceX)
+                    axHod.plot(xLeft, times, color=colors[i %10])
+            if receiversRight.size != 0:
+                orientations.append('Right')
+                self.dataUI.modellingData.combinationSR.append([sourceX, 1])
+                inter, v = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
+                h, v = model1D(inter, v)
+                for j in range(self.dataUI.modellingData.nbLayers):
+                    xRight = xAxisShow[xAxisShow >= sourceX]
+                    times = inter[j] + (1/v[j])*np.abs(xRight-sourceX)
+                    axHod.plot(xRight, times, color=colors[i %10])
+            self.dataUI.modellingAnimation.namesOrientations.append(orientations)
+        self.hodochronesGraph.draw()
+        # Implement the source/receiver selector:
+        self.sourceSelector.clear()
+        self.receiversSelector.clear()
+        self.sourceSelector.addItems(self.dataUI.modellingAnimation.namesSources)
+        self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
+        self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
+
+    def sourceSelectorChanged(self, i):
+        self.receiversSelector.clear()
+        self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[i])
+    
+    def plotHodochrones(self, sensors, measurements):
+        self.hodochronesGraph.axes.cla()
+        ax=self.hodochronesGraph.axes
+        sources = np.unique(measurements[:,0]).astype(int)
+        colors = matplotlib.pyplot.cm.tab10(np.arange(10))
+        hasError = len(measurements[0,:])==4
+        for i, sId in enumerate(sources):
+            index = measurements[:,0].astype(int) == sId
+            ti = measurements[index, 2]
+            ri = sensors[measurements[index, 1].astype(int) - 1, 0]
+            if hasError:
+                erri = measurements[index, 3]
+                ax.errorbar(ri, ti, yerr=erri, linestyle='none', color=colors[i % 10], marker='s', markersize=5)
+            else:
+                ax.plot(ri, ti, linestyle='none', color=colors[i % 10], marker='s', markersize=5)
+        ax.set_xlabel('X (m)')
+        ax.set_ylabel('Traveltime (s)')
+        ax.set_ylim(bottom=0.0)
+        ax.grid(True)
+        self.hodochronesGraph.fig.tight_layout()
+        self.hodochronesGraph.draw()
 
     def _saveModel(self):
         # TODO
@@ -670,7 +822,6 @@ class Window(QMainWindow):
         ## Tab for the inversion of the data using pygimli api.
         inversionTab = QWidget(self.tabs)
         layout = QGridLayout(self.tabs)
-
         ## Selecting the picking file:
         self.filePicksPath = QLabel('File path', inversionTab)
         self.filePicksPath.setAlignment(Qt.AlignCenter)
@@ -748,7 +899,6 @@ class Window(QMainWindow):
         self.runInversion.clicked.connect(self._runInversion)
         self.groupeOption.setLayout(groupOptionLayout)
         # - Lambda ('lam')
-        # - ReferenceModel --> impossible with the invert method used for TT --> line 422 of inversion.py --> self.inv.setReferenceModel(self.startModel)!
         # - InitialModel
         # - ErrorModel
         # Button for running the inversion
@@ -832,13 +982,32 @@ class Window(QMainWindow):
         # Options for the tab:
         self.groupOptionModelling = QGroupBox()
         self.groupOptionModelling.setTitle('Options')
+        self.sourceSelector = QComboBox(self.groupOptionModelling)
+        self.receiversSelector = QComboBox(self.groupOptionModelling)
+        labelSourceReceiver = QLabel('Select source and orientation :',self.groupOptionModelling)
+        layoutOptions = QGridLayout()
+        layoutOptions.addWidget(labelSourceReceiver, 0, 0, 1, 4, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(self.sourceSelector, 0, 4, 1, 4)
+        layoutOptions.addWidget(self.receiversSelector, 0, 8, 1, 2)
+        self.drawLine = QPushButton('Draw Lines', self.groupOptionModelling)
+        self.movePoints = QPushButton('Move Points', self.groupOptionModelling)
+        self.nbLayersSelector = QSpinBox(self.groupOptionModelling)
+        self.nbLayersSelector.setMaximum(3)
+        self.nbLayersSelector.setMinimum(2)
+        self.nbLayersSelector.setValue(self.dataUI.modellingData.nbLayers)
+        nbLayersLabel = QLabel('Select the number of layers :')
+        layoutOptions.addWidget(self.drawLine, 1, 0, 1, 5)
+        layoutOptions.addWidget(self.movePoints, 1, 5, 1, 5)
+        layoutOptions.addWidget(nbLayersLabel, 2, 0, 1, 5, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(self.nbLayersSelector, 2, 5, 1, 5)
+        self.groupOptionModelling.setLayout(layoutOptions)
         # Setup of the layout:
         layout = QGridLayout(modellingTab)
         layout.addWidget(self.filePicksPath, 0, 0, 1, 9)
         layout.addWidget(self.buttonGetSgtFile,0, 9, 1, 1)
         layout.addLayout(hodochronesWidget, 1, 0, 7, 5)
         layout.addLayout(modelWidget, 1, 5, 7, 5)
-        layout.addWidget(self.groupOptionModelling, 9, 0, 2, 10)
+        layout.addWidget(self.groupOptionModelling, 9, 0, 2, 5)
         modellingTab.setLayout(layout)
         return modellingTab
 
