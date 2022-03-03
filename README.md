@@ -21,8 +21,8 @@ In the picking tab, you can load data from `*.segy` or `*.seg2` data (read opera
 The formatting of the geometry file with `2` sources and `n` receivers is given in the snippet below:
 ```
 SOURCES
-Filename1.ext   sourceX sourceY
-Filename2.ext   sourceX sourceY
+Filename1.seg2   sourceX sourceY
+Filename2.seg2   sourceX sourceY
 RECEIVERS
 r1X r1Y
 r2X r2Y
