@@ -215,7 +215,7 @@ class Window(QMainWindow):
 
         ## Initialize the UI
         self.setWindowTitle('Sardine Reborn')
-        self.setWindowIcon(QtGui.QIcon('SardineRebornLogo_100ppp.png'))
+        self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
         self.resize(1100,600)
 
         ## Adding tabs to the layout
@@ -265,7 +265,7 @@ class Window(QMainWindow):
     ## Oppening and closing message boxes:
     def showEvent(self, event):
         msgBox = QMessageBox(self)
-        msgBox.setIconPixmap(QtGui.QPixmap('SardineRebornLogo_100ppp.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
+        msgBox.setIconPixmap(QtGui.QPixmap('./images/SardineRebornLogo_100ppp.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
         msgBox.setText('Welcome to Sardine Reborn!')
         msgBox.setInformativeText('by Hadrien Michel (2022)')
         msgBox.setWindowTitle('Welcome!')
