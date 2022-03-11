@@ -84,7 +84,7 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
         y = times[maxCurvIndex[i] : maxCurvIndex[i+1]]
         if i == 0:
             x = x[:, np.newaxis]
-            p = np.linalg.lstsq(x, y)
+            p = np.linalg.lstsq(x, y, rcond=None)
             v[i] = 1/p[0][0]
             inter[i] = 0
         else:
@@ -94,18 +94,33 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
     return inter, v
 
 def model1D(inter, v):
-    pass
     h = np.ones((len(v)-1,))
+    pos = np.zeros((len(v), 2))
     for i in np.arange(1, len(v)):
         iCr = np.arcsin(v[:i]/v[i])
         tInterp = inter[i]
         for j in np.arange(i-1):
             tInterp -= 2*h[j]*np.cos(iCr[j])/v[j]
+            if j < i-1:
+                pos[i, 0] += np.tan(iCr[j]) * h[j]
         h[i-1] = v[i-1] * tInterp / (2*np.cos(iCr[i-1]))
-    return h, v    
+        pos[i, 1] = pos[i-1, 1] + h[i-1]
+        pos[i, 0] = pos[i-1, 0] + np.tan(iCr[i-1]) * h[i-1]
+    return h, v, pos
 
-def modelWithSlope(interp, v):
-    pass
+def modelWithSlope(interS, vS):
+    v1 = np.sum(vS[0,:])/2 # We take the mean velocity between the two possibilities 
+    # Find alpha and v2
+    ipA = np.arcsin(v1/vS[1,0])
+    imA = np.arcsin(v1/vS[1,1])
+    iCr = (ipA + imA)/2
+    alpha = (ipA - imA)/2
+    v2 = v1/np.sin(iCr)
+    hL = v1*interS[1,0]/(2*np.cos(iCr))
+    hR = v1*interS[1,1]/(2*np.cos(iCr))
+    v = [v1, v2]
+    return v, hL, hR
+
 
 ## Need to take a closer look at this: https://programmerall.com/article/10751929193/
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
@@ -675,6 +690,9 @@ class Window(QMainWindow):
         colors = matplotlib.pyplot.cm.tab10(np.arange(10))
         xAxisShow = np.linspace(np.min(sensors[:,0]), np.max(sensors[:,0]),1000)
         axHod = self.hodochronesGraph.axes
+        axMod = self.modelGraph.axes
+        axMod.plot(sensors[:,0], sensors[:, 1], marker='v', color='k')
+        axMod.grid()
         for i, sId in enumerate(sources):
             sourceX = sensors[sId-1,0]
             self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
@@ -689,22 +707,31 @@ class Window(QMainWindow):
                 orientations.append('Left')
                 self.dataUI.modellingData.combinationSR.append([sourceX, -1])
                 inter, v = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
-                h, v = model1D(inter, v)
+                h, v, pos = model1D(inter, v)
                 for j in range(self.dataUI.modellingData.nbLayers):
                     xLeft = xAxisShow[xAxisShow <= sourceX]
                     times = inter[j] + (1/v[j])*np.abs(xLeft-sourceX)
                     axHod.plot(xLeft, times, color=colors[i %10])
+                axMod.plot(sourceX - pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
             if receiversRight.size != 0:
                 orientations.append('Right')
                 self.dataUI.modellingData.combinationSR.append([sourceX, 1])
                 inter, v = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
-                h, v = model1D(inter, v)
+                h, v, pos = model1D(inter, v)
                 for j in range(self.dataUI.modellingData.nbLayers):
                     xRight = xAxisShow[xAxisShow >= sourceX]
                     times = inter[j] + (1/v[j])*np.abs(xRight-sourceX)
                     axHod.plot(xRight, times, color=colors[i %10])
+                axMod.plot(sourceX + pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
             self.dataUI.modellingAnimation.namesOrientations.append(orientations)
         self.hodochronesGraph.draw()
+        axMod.set_xlabel('X [m]')
+        axMod.set_ylabel('Depth [m]')
+        xRange = axMod.get_xlim()
+        xRange = xRange[1] - xRange[0]
+        axMod.set_ylim((-1, np.ceil(xRange/5)))
+        axMod.invert_yaxis()
+        self.modelGraph.draw()
         # Implement the source/receiver selector:
         self.sourceSelector.clear()
         self.receiversSelector.clear()
@@ -986,20 +1013,18 @@ class Window(QMainWindow):
         self.receiversSelector = QComboBox(self.groupOptionModelling)
         labelSourceReceiver = QLabel('Select source and orientation :',self.groupOptionModelling)
         layoutOptions = QGridLayout()
-        layoutOptions.addWidget(labelSourceReceiver, 0, 0, 1, 4, alignment=Qt.AlignRight)
-        layoutOptions.addWidget(self.sourceSelector, 0, 4, 1, 4)
-        layoutOptions.addWidget(self.receiversSelector, 0, 8, 1, 2)
-        self.drawLine = QPushButton('Draw Lines', self.groupOptionModelling)
+        layoutOptions.addWidget(labelSourceReceiver, 1, 0, 1, 4, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(self.sourceSelector, 1, 4, 1, 4)
+        layoutOptions.addWidget(self.receiversSelector, 1, 8, 1, 2)
         self.movePoints = QPushButton('Move Points', self.groupOptionModelling)
         self.nbLayersSelector = QSpinBox(self.groupOptionModelling)
         self.nbLayersSelector.setMaximum(3)
         self.nbLayersSelector.setMinimum(2)
         self.nbLayersSelector.setValue(self.dataUI.modellingData.nbLayers)
         nbLayersLabel = QLabel('Select the number of layers :')
-        layoutOptions.addWidget(self.drawLine, 1, 0, 1, 5)
-        layoutOptions.addWidget(self.movePoints, 1, 5, 1, 5)
-        layoutOptions.addWidget(nbLayersLabel, 2, 0, 1, 5, alignment=Qt.AlignRight)
-        layoutOptions.addWidget(self.nbLayersSelector, 2, 5, 1, 5)
+        layoutOptions.addWidget(nbLayersLabel, 0, 0, 1, 5, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(self.nbLayersSelector, 0, 5, 1, 5)
+        layoutOptions.addWidget(self.movePoints, 2, 0, 1, 10)
         self.groupOptionModelling.setLayout(layoutOptions)
         # Setup of the layout:
         layout = QGridLayout(modellingTab)
