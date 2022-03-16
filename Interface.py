@@ -91,6 +91,7 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
             p = np.polyfit(x, y, 1)
             v[i] = 1/p[0]
             inter[i] = p[1]
+    
     return inter, v
 
 def model1D(inter, v):
@@ -109,16 +110,34 @@ def model1D(inter, v):
     return h, v, pos
 
 def modelWithSlope(interS, vS):
-    v1 = np.sum(vS[0,:])/2 # We take the mean velocity between the two possibilities 
+    '''Model from MOTA L. (1954) entiteld "Determination of dips and depths of geological layers by the seismic refraction method"
+    '''
+    nbLayers = np.shape(vS)[0]
+    v0 = np.sum(vS[0,:])/2 # We take the mean velocity between the two possibilities 
     # Find alpha and v2
-    ipA = np.arcsin(v1/vS[1,0])
-    imA = np.arcsin(v1/vS[1,1])
+    ipA = np.arcsin(v0/vS[1,0])
+    imA = np.arcsin(v0/vS[1,1])
     iCr = (ipA + imA)/2
-    alpha = (ipA - imA)/2
-    v2 = v1/np.sin(iCr)
-    hL = v1*interS[1,0]/(2*np.cos(iCr))
-    hR = v1*interS[1,1]/(2*np.cos(iCr))
-    v = [v1, v2]
+    theta1 = (imA - ipA)/2
+    v1 = v0/np.sin(iCr)
+    zL = [v0*interS[1,0]/(2*np.cos(iCr))]
+    zR = [v0*interS[1,1]/(2*np.cos(iCr))]
+    hL = [zL[0]/np.cos(theta1)] # Depth of the interface below the source A                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+    hR = [zR[0]/np.cos(theta1)] # Depth of the interface below the source B
+    v = [v0, v1]
+    if nbLayers > 2:
+        alpha = np.arcsin(v0/vS[2,1]) - theta1
+        beta = np.arcsin(v0/vS[2,0]) + theta1
+        gamma = np.arcsin(v1/v0 * np.sin(alpha))
+        delta = np.arcsin(v1/v0 * np.sin(beta))
+        iCr = (gamma+delta)/2
+        theta2 = (gamma-delta)/2 + theta1
+        v2 = v1/np.sin(iCr)
+        zL.append(v1*(interS[2,0] - zL[0]/v0 * (np.cos(alpha+beta)+1)/np.cos(alpha))/(2*np.cos(iCr)))
+        zR.append(v1*(interS[2,1] - zR[0]/v0 * (np.cos(alpha+beta)+1)/np.cos(beta))/(2*np.cos(iCr)))
+        hL.append(1/np.cos(theta2) * (zL[0]*np.cos(alpha-theta2+theta1)/np.cos(alpha) + zL[1]))
+        hR.append(1/np.cos(theta2) * (zR[0]*np.cos(beta+theta2-theta1)/np.cos(beta) + zR[1]))
+        v = [v0, v1, v2]
     return v, hL, hR
 
 
@@ -195,10 +214,14 @@ class modellingAnimation():
         self.namesOrientations = []
 class modellingData():
     def __init__(self) -> None:
+        self.sensors = []
+        self.measurements = []
         self.hodoPoints = []
         self.combinationSR = []
         self.model = []
         self.nbLayers = 2
+        self.sourcesX = []
+        self.orientations = []
         self.appVelocities = []
         self.interceptTime = []
 class dataStorage():
@@ -608,6 +631,8 @@ class Window(QMainWindow):
             elif idxMeas < nbMeasurements:
                 measurements[idxMeas,:] = re.split(r'\t+', line)
                 idxMeas += 1
+        self.dataUI.modellingData.sensors = sensors
+        self.dataUI.modellingData.measurements = measurements
         loadPicking = False
         if self.dataUI.dataLoaded:
             # Check if the sgt file corresponds to the already loaded dataset (similar array)
@@ -655,7 +680,7 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.changedSelect = True
         self.filePicksPath.setText(fname)
         self._initPygimli(fname)
-        self._initModelling(sensors, measurements)
+        self._initModelling()
     
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
@@ -672,7 +697,10 @@ class Window(QMainWindow):
         self.invModelGraph.fig.tight_layout()
         self.invModelGraph.draw()
 
-    def _initModelling(self, sensors, measurements):
+    def _initModelling(self):
+        if len(self.dataUI.modellingData.sensors) == 0:
+            return
+        sensors, measurements = self.dataUI.modellingData.sensors, self.dataUI.modellingData.measurements
         if np.all(np.abs(sensors[:,-1]) < 1e-6):
             # Plotting the hodochrones:
             self.plotHodochrones(sensors, measurements)
@@ -693,43 +721,82 @@ class Window(QMainWindow):
         axMod = self.modelGraph.axes
         axMod.plot(sensors[:,0], sensors[:, 1], marker='v', color='k')
         axMod.grid()
+        if len(sources) == 2:
+            vS = np.zeros((self.dataUI.modellingData.nbLayers,2))
+            interpS = np.zeros((self.dataUI.modellingData.nbLayers,2))
+            sourceS = np.zeros((2,))
+            leftDone = False
+            rightDone = False
+        offsetVelocity = 0.5 # Offset for the printing of the velocity
         for i, sId in enumerate(sources):
             sourceX = sensors[sId-1,0]
             self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
+            self.dataUI.modellingData.sourcesX.append(sourceX)
             index = measurements[:,0].astype(int) == sId
             sourceX = sensors[sId-1, 0]
             receiversX = sensors[measurements[index, 1].astype(int) - 1, 0]
             times = measurements[index, 2]
             receiversLeft = receiversX[receiversX < sourceX]
             receiversRight = receiversX[receiversX > sourceX]
+            orientationsText = []
             orientations = []
+            appVel = []
+            intercept = []
             if receiversLeft.size != 0:
-                orientations.append('Left')
+                orientationsText.append('Left')
+                orientations
                 self.dataUI.modellingData.combinationSR.append([sourceX, -1])
                 inter, v = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
+                appVel.append(v)
+                intercept.append(inter)
                 h, v, pos = model1D(inter, v)
                 for j in range(self.dataUI.modellingData.nbLayers):
                     xLeft = xAxisShow[xAxisShow <= sourceX]
                     times = inter[j] + (1/v[j])*np.abs(xLeft-sourceX)
                     axHod.plot(xLeft, times, color=colors[i %10])
+                    axMod.text(sourceX+pos[j,0] + offsetVelocity, pos[j,1] + 2*offsetVelocity, f'$v_{j}$ = {round(v[j],2)} m/s', ha='right')
                 axMod.plot(sourceX - pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
+                if not(leftDone):
+                    vS[:,1] = v
+                    interpS[:,1] = inter
+                    sourceS[1] = sourceX
+                    leftDone = True
             if receiversRight.size != 0:
-                orientations.append('Right')
+                orientationsText.append('Right')
                 self.dataUI.modellingData.combinationSR.append([sourceX, 1])
                 inter, v = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
+                appVel.append(v)
+                intercept.append(inter)
                 h, v, pos = model1D(inter, v)
                 for j in range(self.dataUI.modellingData.nbLayers):
                     xRight = xAxisShow[xAxisShow >= sourceX]
                     times = inter[j] + (1/v[j])*np.abs(xRight-sourceX)
                     axHod.plot(xRight, times, color=colors[i %10])
+                    axMod.text(sourceX+pos[j,0] + offsetVelocity, pos[j,1] + 2*offsetVelocity, f'$v_{j}$ = {round(v[j],2)} m/s', ha='left')
                 axMod.plot(sourceX + pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
-            self.dataUI.modellingAnimation.namesOrientations.append(orientations)
+                if not(rightDone):
+                    vS[:,0] = v
+                    interpS[:,0] = inter
+                    sourceS[0] = sourceX
+                    rightDone = True
+            self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
+            self.dataUI.modellingData.appVelocities.append(appVel)
+            self.dataUI.modellingData.interceptTime.append(intercept)
         self.hodochronesGraph.draw()
+        if leftDone and rightDone:
+            vSlope, hL, hR = modelWithSlope(interpS, vS)
+            for i in range(self.dataUI.modellingData.nbLayers):
+                if i != self.dataUI.modellingData.nbLayers-1:
+                    axMod.plot(sourceS, [hL[i], hR[i]], color='k')
+                if i == 0:
+                    axMod.text(np.mean(sourceS), 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
+                else:
+                    axMod.text(np.mean(sourceS), (hL[i-1] + hR[i-1])/2 + 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
         axMod.set_xlabel('X [m]')
         axMod.set_ylabel('Depth [m]')
         xRange = axMod.get_xlim()
         xRange = xRange[1] - xRange[0]
-        axMod.set_ylim((-1, np.ceil(xRange/5)))
+        axMod.set_ylim((-1, np.ceil(xRange/10)))
         axMod.invert_yaxis()
         self.modelGraph.draw()
         # Implement the source/receiver selector:
@@ -739,12 +806,19 @@ class Window(QMainWindow):
         self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
         self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
 
+    def _updateModelling(self):
+        nbLayers = self.dataUI.modellingData.nbLayers # Gather the number of layers in the model
+        ## Gathering the info about intercept times and apparent velocities:
+
+        pass
+
     def sourceSelectorChanged(self, i):
         self.receiversSelector.clear()
         self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[i])
     
     def plotHodochrones(self, sensors, measurements):
         self.hodochronesGraph.axes.cla()
+        self.modelGraph.axes.cla()
         ax=self.hodochronesGraph.axes
         sources = np.unique(measurements[:,0]).astype(int)
         colors = matplotlib.pyplot.cm.tab10(np.arange(10))
@@ -1021,6 +1095,7 @@ class Window(QMainWindow):
         self.nbLayersSelector.setMaximum(3)
         self.nbLayersSelector.setMinimum(2)
         self.nbLayersSelector.setValue(self.dataUI.modellingData.nbLayers)
+        self.nbLayersSelector.valueChanged.connect(self._initModelling)
         nbLayersLabel = QLabel('Select the number of layers :')
         layoutOptions.addWidget(nbLayersLabel, 0, 0, 1, 5, alignment=Qt.AlignRight)
         layoutOptions.addWidget(self.nbLayersSelector, 0, 5, 1, 5)
