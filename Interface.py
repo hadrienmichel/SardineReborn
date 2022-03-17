@@ -80,6 +80,7 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
     maxCurvIndex = np.concatenate(([0], maxCurvIndex, [len(times)-1]))
     v = np.zeros((nbLayers,))
     inter = np.zeros((nbLayers,))
+    points = np.zeros((nbLayers+1,2)) # Points to store the intersections of interest
     for i in range(nbLayers):
         x = receiversX[maxCurvIndex[i] : maxCurvIndex[i+1]]
         y = times[maxCurvIndex[i] : maxCurvIndex[i+1]]
@@ -93,7 +94,21 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
             v[i] = 1/p[0]
             inter[i] = p[1]
     
-    return inter, v
+    points[0,0] = sourceX
+    for i in range(nbLayers):
+        if i < nbLayers-1:
+            xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
+            tTemp = inter[i] + xTemp*(1/v[i])
+            points[i+1,0] = sourceX + orientation*xTemp
+            points[i+1,1] = tTemp
+        else:
+            if orientation > 0:
+                points[i+1,0] = max(receiversX)
+            else:
+                points[i+1,0] = min(receiversX)
+            points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
+
+    return inter, v, points
 
 def model1D(inter, v):
     h = np.ones((len(v)-1,))
@@ -735,24 +750,28 @@ class Window(QMainWindow):
             orientations = []
             appVel = []
             intercept = []
+            hodoPts = []
             if receiversLeft.size != 0:
                 orientationsText.append('Left')
                 orientations.append(-1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, -1])
-                inter, v = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
+                inter, v, points = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
                 appVel.append(v)
                 intercept.append(inter)
+                hodoPts.append(points)
             if receiversRight.size != 0:
                 orientationsText.append('Right')
                 orientations.append(1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, 1])
-                inter, v = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
+                inter, v, points = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
                 appVel.append(v)
                 intercept.append(inter)
+                hodoPts.append(points)
             self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
             self.dataUI.modellingData.appVelocities.append(appVel)
             self.dataUI.modellingData.interceptTime.append(intercept)
             self.dataUI.modellingData.orientations.append(orientations)
+            self.dataUI.modellingData.hodoPoints.append(hodoPts)
         self._updateHodoGraph()
         self._updateModelGraph()
         # Implement the source/receiver selector:
@@ -772,10 +791,12 @@ class Window(QMainWindow):
             for j, orientation in enumerate(self.dataUI.modellingData.orientations[i]):
                 vel = self.dataUI.modellingData.appVelocities[i][j]
                 inter = self.dataUI.modellingData.interceptTime[i][j]
+                points = self.dataUI.modellingData.hodoPoints[i][j]
                 xShow = xAxisShow[(xAxisShow - sourceX)*orientation >= 0]
                 for k in range(self.dataUI.modellingData.nbLayers):
                     times = inter[k] + (1/vel[k])*np.abs(xShow-sourceX)
                     axHod.plot(xShow, times, color=colors[i %10])
+                axHod.plot(points[:,0], points[:,1], linestyle='none', marker='o', color='k', markersize=5)
         self.hodochronesGraph.draw()
 
     def _updateModelGraph(self):    
