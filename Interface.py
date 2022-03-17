@@ -1,4 +1,5 @@
 ## Imports for the inner functions
+import enum
 import sys
 import os
 import re
@@ -210,6 +211,7 @@ class modellingAnimation():
         self.currPosition = [0, 0]
         self.maxClickLength = 0.5
         self.timeOnClick = 0
+        self.offsetVelocity = 0.5
         self.namesSources = []
         self.namesOrientations = []
 class modellingData():
@@ -711,24 +713,15 @@ class Window(QMainWindow):
         self.dataUI.modellingData.nbLayers = self.nbLayersSelector.value()
         self.dataUI.modellingData.hodoPoints = []
         self.dataUI.modellingData.combinationSR = []
+        self.dataUI.modellingData.sourcesX = []
+        self.dataUI.modellingData.appVelocities = []
+        self.dataUI.modellingData.interceptTime = []
+        self.dataUI.modellingData.orientations = []
         # Gather the possible sources and orientations:
         self.dataUI.modellingAnimation.namesSources = []
         self.dataUI.modellingAnimation.namesOrientations = []
         sources = np.unique(measurements[:,0]).astype(int)
-        colors = matplotlib.pyplot.cm.tab10(np.arange(10))
-        xAxisShow = np.linspace(np.min(sensors[:,0]), np.max(sensors[:,0]),1000)
-        axHod = self.hodochronesGraph.axes
-        axMod = self.modelGraph.axes
-        axMod.plot(sensors[:,0], sensors[:, 1], marker='v', color='k')
-        axMod.grid()
-        if len(sources) == 2:
-            vS = np.zeros((self.dataUI.modellingData.nbLayers,2))
-            interpS = np.zeros((self.dataUI.modellingData.nbLayers,2))
-            sourceS = np.zeros((2,))
-            leftDone = False
-            rightDone = False
-        offsetVelocity = 0.5 # Offset for the printing of the velocity
-        for i, sId in enumerate(sources):
+        for sId in sources:
             sourceX = sensors[sId-1,0]
             self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
             self.dataUI.modellingData.sourcesX.append(sourceX)
@@ -744,54 +737,89 @@ class Window(QMainWindow):
             intercept = []
             if receiversLeft.size != 0:
                 orientationsText.append('Left')
-                orientations
+                orientations.append(-1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, -1])
                 inter, v = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
                 appVel.append(v)
                 intercept.append(inter)
-                h, v, pos = model1D(inter, v)
-                for j in range(self.dataUI.modellingData.nbLayers):
-                    xLeft = xAxisShow[xAxisShow <= sourceX]
-                    times = inter[j] + (1/v[j])*np.abs(xLeft-sourceX)
-                    axHod.plot(xLeft, times, color=colors[i %10])
-                    axMod.text(sourceX+pos[j,0] + offsetVelocity, pos[j,1] + 2*offsetVelocity, f'$v_{j}$ = {round(v[j],2)} m/s', ha='right')
-                axMod.plot(sourceX - pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
-                if not(leftDone):
-                    vS[:,1] = v
-                    interpS[:,1] = inter
-                    sourceS[1] = sourceX
-                    leftDone = True
             if receiversRight.size != 0:
                 orientationsText.append('Right')
+                orientations.append(1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, 1])
                 inter, v = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
                 appVel.append(v)
                 intercept.append(inter)
-                h, v, pos = model1D(inter, v)
-                for j in range(self.dataUI.modellingData.nbLayers):
-                    xRight = xAxisShow[xAxisShow >= sourceX]
-                    times = inter[j] + (1/v[j])*np.abs(xRight-sourceX)
-                    axHod.plot(xRight, times, color=colors[i %10])
-                    axMod.text(sourceX+pos[j,0] + offsetVelocity, pos[j,1] + 2*offsetVelocity, f'$v_{j}$ = {round(v[j],2)} m/s', ha='left')
-                axMod.plot(sourceX + pos[:,0], pos[:,1], linestyle='none', color='k', marker='x')
-                if not(rightDone):
-                    vS[:,0] = v
-                    interpS[:,0] = inter
-                    sourceS[0] = sourceX
-                    rightDone = True
             self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
             self.dataUI.modellingData.appVelocities.append(appVel)
             self.dataUI.modellingData.interceptTime.append(intercept)
+            self.dataUI.modellingData.orientations.append(orientations)
+        self._updateHodoGraph()
+        self._updateModelGraph()
+        # Implement the source/receiver selector:
+        self.sourceSelector.clear()
+        self.receiversSelector.clear()
+        self.sourceSelector.addItems(self.dataUI.modellingAnimation.namesSources)
+        self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
+        self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
+    
+    def _updateHodoGraph(self):
+        axHod = self.hodochronesGraph.axes
+        axHod.cla()
+        self.plotHodochrones(self.dataUI.modellingData.sensors, self.dataUI.modellingData.measurements)
+        colors = matplotlib.pyplot.cm.tab10(np.arange(10))
+        xAxisShow = np.linspace(np.min(self.dataUI.modellingData.sensors[:,0]), np.max(self.dataUI.modellingData.sensors[:,0]),1000)
+        for i, sourceX in enumerate(self.dataUI.modellingData.sourcesX):
+            for j, orientation in enumerate(self.dataUI.modellingData.orientations[i]):
+                vel = self.dataUI.modellingData.appVelocities[i][j]
+                inter = self.dataUI.modellingData.interceptTime[i][j]
+                xShow = xAxisShow[(xAxisShow - sourceX)*orientation >= 0]
+                for k in range(self.dataUI.modellingData.nbLayers):
+                    times = inter[k] + (1/vel[k])*np.abs(xShow-sourceX)
+                    axHod.plot(xShow, times, color=colors[i %10])
         self.hodochronesGraph.draw()
-        if leftDone and rightDone:
-            vSlope, hL, hR = modelWithSlope(interpS, vS)
-            for i in range(self.dataUI.modellingData.nbLayers):
-                if i != self.dataUI.modellingData.nbLayers-1:
-                    axMod.plot(sourceS, [hL[i], hR[i]], color='k')
-                if i == 0:
-                    axMod.text(np.mean(sourceS), 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
+
+    def _updateModelGraph(self):    
+        axMod = self.modelGraph.axes
+        axMod.cla()
+        # Show the sensors array at the surface:
+        axMod.plot(self.dataUI.modellingData.sensors[:,0], self.dataUI.modellingData.sensors[:,1], marker='v', color='k')
+        axMod.grid()
+        offsetVelocity = self.dataUI.modellingAnimation.offsetVelocity
+        sourcesOrientation = []
+        for i, sourceX in enumerate(self.dataUI.modellingData.sourcesX):
+            for j, orientation in enumerate(self.dataUI.modellingData.orientations[i]):
+                sourcesOrientation.append([i, j, sourceX, orientation])
+                if orientation > 0:
+                    ha='left'
                 else:
-                    axMod.text(np.mean(sourceS), (hL[i-1] + hR[i-1])/2 + 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
+                    ha='right'
+                vel = self.dataUI.modellingData.appVelocities[i][j]
+                inter = self.dataUI.modellingData.interceptTime[i][j]
+                _, v, pos = model1D(inter, vel)
+                axMod.plot(sourceX + pos[:,0]*orientation, pos[:,1], linestyle='none', color='k', marker='x')
+                for k in range(self.dataUI.modellingData.nbLayers):
+                    axMod.text(sourceX+pos[j,0] + offsetVelocity, pos[k,1] + 2*offsetVelocity, f'$v_{k}$ = {round(v[k],2)} m/s', ha=ha)
+        sourcesOrientation = np.asarray(sourcesOrientation)
+        sourcesOrientation[np.lexsort((sourcesOrientation[:,3], sourcesOrientation[:,2]))]
+        sourcesLeft = sourcesOrientation[sourcesOrientation[:,3]<0, :]
+        sourcesRight = sourcesOrientation[sourcesOrientation[:,3]>0, :]
+        for s1 in sourcesRight.tolist():
+            sourceX = s1[2]
+            for s2 in sourcesLeft[sourcesLeft[:,2] > sourceX].tolist():
+                vel1 = self.dataUI.modellingData.appVelocities[int(s1[0])][int(s1[1])]
+                inter1 = self.dataUI.modellingData.interceptTime[int(s1[0])][int(s1[1])]
+                vel2 = self.dataUI.modellingData.appVelocities[int(s2[0])][int(s2[1])]
+                inter2 = self.dataUI.modellingData.interceptTime[int(s2[0])][int(s2[1])]
+                vS = np.asarray([vel1, vel2]).T
+                interpS = np.asarray([inter1, inter2]).T
+                vSlope, hL, hR = modelWithSlope(interpS, vS)
+                for i in range(self.dataUI.modellingData.nbLayers):
+                    if i != self.dataUI.modellingData.nbLayers-1:
+                        axMod.plot([s1[2], s2[2]], [hL[i], hR[i]], color='k')
+                    if i == 0:
+                        axMod.text(np.mean([s1[2], s2[2]]), 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
+                    else:
+                        axMod.text(np.mean([s1[2], s2[2]]), (hL[i-1] + hR[i-1])/2 + 2*offsetVelocity, f'$v_{i}$ = {round(vSlope[i],2)} m/s', ha='center')
         axMod.set_xlabel('X [m]')
         axMod.set_ylabel('Depth [m]')
         xRange = axMod.get_xlim()
@@ -799,12 +827,6 @@ class Window(QMainWindow):
         axMod.set_ylim((-1, np.ceil(xRange/10)))
         axMod.invert_yaxis()
         self.modelGraph.draw()
-        # Implement the source/receiver selector:
-        self.sourceSelector.clear()
-        self.receiversSelector.clear()
-        self.sourceSelector.addItems(self.dataUI.modellingAnimation.namesSources)
-        self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
-        self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
 
     def _updateModelling(self):
         nbLayers = self.dataUI.modellingData.nbLayers # Gather the number of layers in the model
@@ -817,8 +839,6 @@ class Window(QMainWindow):
         self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[i])
     
     def plotHodochrones(self, sensors, measurements):
-        self.hodochronesGraph.axes.cla()
-        self.modelGraph.axes.cla()
         ax=self.hodochronesGraph.axes
         sources = np.unique(measurements[:,0]).astype(int)
         colors = matplotlib.pyplot.cm.tab10(np.arange(10))
