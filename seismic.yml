@@ -1,6 +1,7 @@
 name: seismic
 channels:
   - gimli
+  - conda-forge
 dependencies:
   - python=3.8.12
   - matplotlib=3.3.4
