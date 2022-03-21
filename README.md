@@ -10,7 +10,6 @@ Sardine Reborn has several functionalities. All are oriented towards the more pe
 - [Sardine Reborn](#sardine-reborn)
   - [Functionalities](#functionalities)
   - [Installation](#installation)
-- [__Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__](#attention-the-current-implementation-of-the-code-is-not-stable-to-user-errors-save-your-progresses-along-the-way)
   - [Picking](#picking)
   - [Inversion](#inversion)
   - [Modelling](#modelling)
@@ -40,7 +39,7 @@ python Interface.pyw
 
 The code will launch automatically.
 
-# __Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__
+__Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__
 
 ## Picking
 ![Picking window layout](./images/pickingTab.PNG)
