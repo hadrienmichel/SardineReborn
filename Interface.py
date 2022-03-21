@@ -1,5 +1,4 @@
 ## Imports for the inner functions
-import enum
 import sys
 import os
 import re
@@ -69,6 +68,7 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
 
     '''
     # Change the coordinates if requiered and normalize to sourceX = 0:
+    receiversXSave = receiversX
     if orientation < 0:
         receiversX = np.flip(np.abs(receiversX - sourceX))
         times = np.flip(times)
@@ -103,9 +103,9 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
             points[i+1,1] = tTemp
         else:
             if orientation > 0:
-                points[i+1,0] = max(receiversX)
+                points[i+1,0] = max(receiversXSave)
             else:
-                points[i+1,0] = min(receiversX)
+                points[i+1,0] = min(receiversXSave)
             points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
 
     return inter, v, points
@@ -221,12 +221,13 @@ class inversionData():
         self.startModel = pg.Vector(ratools.createGradientModel2D(data, mesh, self.vTop, self.vBottom))
 class modellingAnimation():
     def __init__(self) -> None:
-        self.drawingLine = False
-        self.movingPoint = False
         self.currPosition = [0, 0]
         self.maxClickLength = 0.5
         self.timeOnClick = 0
         self.offsetVelocity = 0.5
+        self.tol = [1, 0.002] # x in meteres, y in seconds
+        self.currPointId = 1
+        self.changingPts = False
         self.namesSources = []
         self.namesOrientations = []
 class modellingData():
@@ -343,16 +344,10 @@ class Window(QMainWindow):
         if event.inaxes is not None:
             self.dataUI.animationPicking.mousePosition = event.xdata
         return 0
-    
-    def changeMouseModelling(self, event): # For the modelling window
-        if event.inaxes is not None:
-            self.dataUI.modellingAnimation.currPosition = [event.xdata, event.ydata]
-        return 0
 
     def onPress(self, event): # For both windows
         if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
-            self.dataUI.modellingAnimation.timeOnClick = time.time()
         return 0
 
     def onRelease(self, event):
@@ -371,10 +366,37 @@ class Window(QMainWindow):
                     self.dataUI.animationPicking.changedSelect = True
         return 0
     
+    def onPressModelling(self, event):
+        if event.button == MouseButton.LEFT:
+            sourceId = self.sourceSelector.currentIndex()
+            receiversOrientation = self.receiversSelector.currentIndex()
+            points = np.asarray(self.dataUI.modellingData.hodoPoints[sourceId][receiversOrientation])
+            nbPoints = points.shape[0]
+            mousePosition = np.repeat(np.asarray([event.xdata, event.ydata]).reshape((1,2)), nbPoints, axis=0)
+            diff = np.abs(points-mousePosition)
+            diffXBool = diff[:,0] < self.dataUI.modellingAnimation.tol[0]
+            diffYBool = diff[:,1] < self.dataUI.modellingAnimation.tol[1]
+            ptsId = np.logical_and(diffXBool, diffYBool)
+            ptsId = np.where(ptsId)[0]
+            if ptsId > 0:
+                self.dataUI.modellingAnimation.currPointId = ptsId
+                self.dataUI.modellingAnimation.changingPts = True
+            else:
+                self.dataUI.modellingAnimation.changingPts = False
+            self.dataUI.modellingAnimation.timeOnClick = time.time()
+        return
+
     def onReleaseModelling(self, event):
-        if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.modellingAnimation.timeOnClick) < self.dataUI.modellingAnimation.maxClickLength):
-            # Add point to the list 
-            pass
+        self.dataUI.modellingAnimation.changingPts = False    
+
+    def changeMouseModelling(self, event): # For the modelling window
+        if (event.inaxes is not None) and self.dataUI.modellingAnimation.changingPts:
+            sourceId = self.sourceSelector.currentIndex()
+            receiversOrientation = self.receiversSelector.currentIndex()
+            ptsId = self.dataUI.modellingAnimation.currPointId
+            # print(f'Mouse at x={event.xdata}, y={event.ydata} changed')
+            self.dataUI.modellingData.hodoPoints[sourceId][receiversOrientation][ptsId,:] = [event.xdata, event.ydata]
+        return 0
     
     def animationZoom(self, i):
         axZoom = self.zoomGraph.axes
@@ -849,11 +871,49 @@ class Window(QMainWindow):
         axMod.invert_yaxis()
         self.modelGraph.draw()
 
-    def _updateModelling(self):
+    def _updateModelling(self, frame):
         nbLayers = self.dataUI.modellingData.nbLayers # Gather the number of layers in the model
         ## Gathering the info about intercept times and apparent velocities:
+        sourceId = self.sourceSelector.currentIndex()
+        receiversOrientation = self.receiversSelector.currentIndex()
+        orientation = self.dataUI.modellingData.orientations[sourceId][receiversOrientation]
+        points = np.asarray(self.dataUI.modellingData.hodoPoints[sourceId][receiversOrientation])
+        nbLayers = self.dataUI.modellingData.nbLayers
+        vel = np.zeros((nbLayers,))
+        inter = np.zeros((nbLayers,))
+        sourceX = points[0, 0]
+        for i in range(self.dataUI.modellingData.nbLayers):
+            vel[i] = np.abs((points[i+1,0] - points[i,0])/(points[i+1,1] - points[i,1]))
+            inter[i] = 1/vel[i] * (sourceX-points[i,0]) * orientation + points[i,1]
+        self.dataUI.modellingData.appVelocities[sourceId][receiversOrientation] = vel
+        self.dataUI.modellingData.interceptTime[sourceId][receiversOrientation] = inter
+        ## Updating the graphs:
+        self._updateHodoGraph()
+        self._updateModelGraph()
 
-        pass
+    def animateModelling(self):
+        self.connectMouse = self.hodochronesGraph.mpl_connect('motion_notify_event', self.changeMouseModelling)
+        self.connectPress = self.hodochronesGraph.mpl_connect('button_press_event', self.onPressModelling)
+        self.connectRelease = self.hodochronesGraph.mpl_connect('button_release_event', self.onReleaseModelling)
+        self.aniModelling = animation.FuncAnimation(self.hodochronesGraph.fig, self._updateModelling)# , interval=16.7)
+        self.modelGraph.draw()
+        self.hodochronesGraph.draw()
+
+    def setAnimationModelling(self):
+        if self.aniModelling is None:
+            if self.movePoints.isChecked():
+                self.animateModelling()
+        else:
+            if self.movePoints.isChecked():
+                self.aniModelling.event_source.start()
+                self.connectMouse = self.hodochronesGraph.mpl_connect('motion_notify_event', self.changeMouseModelling)
+                self.connectPress = self.hodochronesGraph.mpl_connect('button_press_event', self.onPressModelling)
+                self.connectRelease = self.hodochronesGraph.mpl_connect('button_release_event', self.onReleaseModelling)
+            else:
+                self.aniModelling.event_source.stop()
+                self.hodochronesGraph.mpl_disconnect(self.connectMouse)
+                self.hodochronesGraph.mpl_disconnect(self.connectPress)
+                self.hodochronesGraph.mpl_disconnect(self.connectRelease)
 
     def sourceSelectorChanged(self, i):
         self.receiversSelector.clear()
@@ -1132,6 +1192,8 @@ class Window(QMainWindow):
         layoutOptions.addWidget(self.sourceSelector, 1, 4, 1, 4)
         layoutOptions.addWidget(self.receiversSelector, 1, 8, 1, 2)
         self.movePoints = QPushButton('Move Points', self.groupOptionModelling)
+        self.movePoints.setCheckable(True)
+        self.movePoints.clicked.connect(self.setAnimationModelling)
         self.nbLayersSelector = QSpinBox(self.groupOptionModelling)
         self.nbLayersSelector.setMaximum(3)
         self.nbLayersSelector.setMinimum(2)
@@ -1150,6 +1212,7 @@ class Window(QMainWindow):
         layout.addLayout(modelWidget, 1, 5, 7, 5)
         layout.addWidget(self.groupOptionModelling, 9, 0, 2, 5)
         modellingTab.setLayout(layout)
+        self.aniModelling = None
         return modellingTab
 
 if __name__ == '__main__':
