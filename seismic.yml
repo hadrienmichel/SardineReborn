@@ -1,0 +1,10 @@
+name: seismic
+channels:
+  - gimli
+dependencies:
+  - python=3.8.12
+  - matplotlib=3.3.4
+  - numpy=1.16.6
+  - obspy=1.2.2
+  - pygimli=1.1.1
+  - pyqt=5.13.3
