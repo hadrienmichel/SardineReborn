@@ -19,7 +19,7 @@ Each of those functionalities have a dedicated tab in the UI. The user can save 
 
 ## Installation
 To install the package and code, download the code using this link:
-[https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip). Un-zip the downloaded archive and locate the directory where it is placed (C:/my-directory) 
+[https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.1.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.1.zip). Un-zip the downloaded archive and locate the directory where it is placed (C:/my-directory) 
 
 In `Anaconda prompt` run the following command (the file `seismic.yml` must be in the current directory):
 ``` 
