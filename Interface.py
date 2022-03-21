@@ -378,12 +378,14 @@ class Window(QMainWindow):
             diffYBool = diff[:,1] < self.dataUI.modellingAnimation.tol[1]
             ptsId = np.logical_and(diffXBool, diffYBool)
             ptsId = np.where(ptsId)[0]
-            if ptsId > 0:
-                self.dataUI.modellingAnimation.currPointId = ptsId
-                self.dataUI.modellingAnimation.changingPts = True
-            else:
-                self.dataUI.modellingAnimation.changingPts = False
-            self.dataUI.modellingAnimation.timeOnClick = time.time()
+            if len(ptsId) > 1:
+                ptsId = ptsId[-1] # We take the last from both possibilities
+            if len(ptsId) > 0:
+                if ptsId > 0:
+                    self.dataUI.modellingAnimation.currPointId = ptsId
+                    self.dataUI.modellingAnimation.changingPts = True
+                else:
+                    self.dataUI.modellingAnimation.changingPts = False
         return
 
     def onReleaseModelling(self, event):

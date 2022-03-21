@@ -7,9 +7,12 @@ This new implementation is fully devellopped in Python with a pyQT GUI. Currentl
 
 ## Functionalities
 Sardine Reborn has several functionalities. All are oriented towards the more pedagogical aspect than for production-readyness. This means that very few actions are automated andthat the software is aimed as an hands-on approach to seismic refraction data.
-- [Picking](#picking)
-- [Inversion](#inversion) (travel-time tomography)
-- [Time-intercept modelling](#modelling)
+- [Sardine Reborn](#sardine-reborn)
+  - [Functionalities](#functionalities)
+  - [Picking](#picking)
+  - [Inversion](#inversion)
+  - [Modelling](#modelling)
+- [References:](#references)
 
 Each of those functionalities have a dedicated tab in the UI. The user can save picking and models, as well as figures that are produced. 
 
@@ -100,7 +103,7 @@ Lastely, you can also load an already existing `*.sgt` file. In case the geometr
 ## Inversion
 The inversion of the first arrival is performed by interfacing the pyGIMLI API and giving access to the main inversion options. Travel-time tomography works better with mutliple sources and receivers but can still work with a limited number of sources. __Note that the results of the inversion might not result in an accurate estimation of the subsurface due to under-constraints on the model!__ 
 
-TYo load an existing `*.sgt` file, use either of those 3 options:
+To load an existing `*.sgt` file, use either of those 3 options:
 - Menu `File` select `Load Picking File`
 - Press `CTRL+L`
 - Click on the `. . .` button
@@ -132,7 +135,22 @@ When all the parameters are selected, click the `Run inversion` button to run th
 By playing with the different parameters, you will notice that they have a strong impact on the obtained inverse model. Finde the ideal set of parameters that suits your needs by comparing the misfit to the error on each points until you reach a satisfactory estimation.
 ## Modelling
 
-TBD
+The modelling of the data is perfomed using a simple Mota model (see: [Mota, 1954. Determination of dips and depths of geological layers by the seismic refraction method. Geophysics, 19 (2).](https://pubs.geoscienceworld.org/geophysics/article/19/2/242/67153/Determination-of-dips-and-depths-of-geological)). To load an existing `*.sgt` file, use either of those 3 options:
+- Menu `File` select `Load Picking File`
+- Press `CTRL+L`
+- Click on the `. . .` button
+
+Once the data is loaded, a first guess model is proposed. A first guess based on the maximum curvature is proposed.
+
+![First guess of the modelling](./images/modellingTab.PNG)
+
+You can change the model by moving the black points present in the hodochones graph. To do so, select a combination of source and orientation. Then, select `Move Points`. You can move freely all the points for this combination except from the first one (the source position). 
+
+__Unselect `Move Points` when the selection is done to gain performances on the computer!__
+
+You can also add a layer in the model by increasing the number in `Select the number of layers` box.
+
+
 # References:
 This code relies on several python libraries appart from the common numpy, matplotlib, etc.:
 - ObsPy: used for the reading of the seismic traces
