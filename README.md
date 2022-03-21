@@ -10,6 +10,7 @@ Sardine Reborn has several functionalities. All are oriented towards the more pe
 - [Sardine Reborn](#sardine-reborn)
   - [Functionalities](#functionalities)
   - [Installation](#installation)
+- [__Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__](#attention-the-current-implementation-of-the-code-is-not-stable-to-user-errors-save-your-progresses-along-the-way)
   - [Picking](#picking)
   - [Inversion](#inversion)
   - [Modelling](#modelling)
@@ -19,10 +20,11 @@ Each of those functionalities have a dedicated tab in the UI. The user can save 
 
 ## Installation
 To install the package and code, download the code using this link:
-[https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip).
+[https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip). Un-zip the downloaded archive and locate the directory where it is placed (C:/my-directory) 
 
 In `Anaconda prompt` run the following command (the file `seismic.yml` must be in the current directory):
 ``` 
+cd "C:/my-directory"
 conda env create -f seismic.yml
 ```
 This will create a new environement (called `seismic`) with the dependencies for the project.
@@ -33,10 +35,12 @@ conda activate seismic
 ```
 Once the enviroement created, you can run the code by typing in the command line:
 ```
-python Interface.py
+python Interface.pyw
 ```
 
 The code will launch automatically.
+
+# __Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__
 
 ## Picking
 ![Picking window layout](./images/pickingTab.PNG)

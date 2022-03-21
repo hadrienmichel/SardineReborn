@@ -7,4 +7,4 @@ dependencies:
   - numpy=1.16.6
   - obspy=1.2.2
   - pygimli=1.1.1
-  - pyqt=5.13.3
+  - pyqt=5.12.3
