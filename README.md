@@ -9,12 +9,34 @@ This new implementation is fully devellopped in Python with a pyQT GUI. Currentl
 Sardine Reborn has several functionalities. All are oriented towards the more pedagogical aspect than for production-readyness. This means that very few actions are automated andthat the software is aimed as an hands-on approach to seismic refraction data.
 - [Sardine Reborn](#sardine-reborn)
   - [Functionalities](#functionalities)
+  - [Installation](#installation)
   - [Picking](#picking)
   - [Inversion](#inversion)
   - [Modelling](#modelling)
 - [References:](#references)
 
 Each of those functionalities have a dedicated tab in the UI. The user can save picking and models, as well as figures that are produced. 
+
+## Installation
+To install the package and code, download the code using this link:
+[https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.1.zip).
+
+In `Anaconda prompt` run the following command (the file `seismic.yml` must be in the current directory):
+``` 
+conda env create -f seismic.yml
+```
+This will create a new environement (called `seismic`) with the dependencies for the project.
+
+Then, activate the environement:
+```
+conda activate seismic
+```
+Once the enviroement created, you can run the code by typing in the command line:
+```
+python Interface.py
+```
+
+The code will launch automatically.
 
 ## Picking
 ![Picking window layout](./images/pickingTab.PNG)
