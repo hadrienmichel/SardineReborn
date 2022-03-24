@@ -84,13 +84,16 @@ def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
         y = times[maxCurvIndex[i] : maxCurvIndex[i+1]]
         if i == 0:
             x = x[:, np.newaxis]
-            p = np.linalg.lstsq(x, y, rcond=None)
-            v[i] = 1/p[0][0]
+            #p = np.linalg.lstsq(x, y, rcond=None)           
+            #v[i] = 1/p[0][0]
+            v[i]=300
             inter[i] = 0
         else:
-            p = np.polyfit(x, y, 1)
-            v[i] = 1/p[0]
-            inter[i] = p[1]
+            #p = np.polyfit(x, y, 1)
+            v[i] = 300*(i+1)
+            #inter[i] = p[1]
+            inter[i] = 0.005*i
+    
     
     points[0,0] = sourceX
     for i in range(nbLayers):

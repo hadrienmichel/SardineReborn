@@ -3,9 +3,9 @@ channels:
   - gimli
   - conda-forge
 dependencies:
-  - python=3.8.12
-  - matplotlib=3.3.4
-  - numpy=1.16.6
-  - obspy=1.2.2
+  - python
+  - matplotlib
+  - numpy
+  - obspy
   - pygimli=1.1.1
-  - pyqt=5.12.3
+  - pyqt
