@@ -256,8 +256,9 @@ class dataStorage():
         self.dataLoaded = False
         self.pickingDone = False
         self.inversionDone = False
+        self.meshLoaded = False
         self.sisFileId = 0
-        self.beginTime = 0
+        self.beginTime = []
         ## Graphical animation variables:
         self.animationPicking = animationPicking()
 class Window(QMainWindow):
@@ -281,6 +282,7 @@ class Window(QMainWindow):
         self.setCentralWidget(self.tabs) 
 
         ## Defining menu actions:
+        ### File openning / saving picking
         openFile = QAction("&Open Geometry File",self)
         openFile.setShortcut('Ctrl+O') # Setting ctrl+o as the shortcut
         openFile.setStatusTip('Open the *.geometry file')
@@ -296,18 +298,51 @@ class Window(QMainWindow):
         loadPicking.setStatusTip('Load an existing *.sgt file for inversion')
         loadPicking.triggered.connect(self._loadPicking)
 
-        saveModel = QAction("Save Current &Model",self)
-        saveModel.setShortcut('Ctrl+M')
-        saveModel.setStatusTip('Save the current model in a *.txt file')
-        saveModel.triggered.connect(self._saveModel)
+        ### Inversion through pigimli:
+        loadInvMesh = QAction('Load Inversion Mesh', self)
+        loadInvMesh.setStatusTip('Load an inversion mesh that was already created (*.poly)')
+        loadInvMesh.triggered.connect(self._loadInvMesh) 
+
+        loadInitialModel = QAction('Load Initial Model', self)
+        loadInitialModel.setStatusTip('Load an existing model as the starting model (*.vector) for the inversion')
+        loadInitialModel.triggered.connect(self._loadInitModel)
+        
+        saveInvMesh = QAction('Save Inversion Mesh', self)
+        saveInvMesh.setStatusTip('Save the inversion mesh (*.poly)')
+        saveInvMesh.triggered.connect(self._saveInvMesh) 
+        
+        saveInvAsVTK = QAction('Save Inversion as VTK', self)
+        saveInvAsVTK.setStatusTip('Save the inversion results into a VTK file (for Paraview)')
+        saveInvAsVTK.triggered.connect(self._saveInvAsVTK)
+
+        saveInvResponse = QAction('Save the Inverse Response', self)
+        saveInvResponse.setStatusTip('Save the model response for the last iteration (*.vector)')
+        saveInvResponse.triggered.connect(self._saveInvResponse) 
+
+        saveInvResult = QAction('Save the Inverse Results', self)
+        saveInvResult.setStatusTip('Save the model for the last iteration (*.vector)')
+        saveInvResult.triggered.connect(self._saveInvResult)
+
+        # saveModel = QAction("Save Current &Model",self)
+        # saveModel.setShortcut('Ctrl+M')
+        # saveModel.setStatusTip('Save the current model in a *.txt file')
+        # saveModel.triggered.connect(self._saveModel)
+
         # Adding the menu bar atop
         menuBarInternal = self.menuBar()
         menuBarInternal.setNativeMenuBar(False)
-        fileMenu = menuBarInternal.addMenu("File")
+        fileMenu = menuBarInternal.addMenu("Picking")
         fileMenu.addAction(openFile)
         fileMenu.addAction(savePicking)
         fileMenu.addAction(loadPicking)
-        fileMenu.addAction(saveModel)
+        # fileMenu.addAction(saveModel)
+        fileMenu = menuBarInternal.addMenu("Inversion")
+        fileMenu.addAction(loadInvMesh)
+        fileMenu.addAction(loadInitialModel)
+        fileMenu.addAction(saveInvMesh)
+        fileMenu.addAction(saveInvResult)
+        fileMenu.addAction(saveInvResponse)
+        fileMenu.addAction(saveInvAsVTK)
 
         ## Defining the status bar:
         self.statusBar = QStatusBar(self)
@@ -350,12 +385,16 @@ class Window(QMainWindow):
 
     def onRelease(self, event):
         if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
-            if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
-                self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
-                self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+            if self.buttonTabPickingSetT0.isChecked():
+                self.dataUI.beginTime[self.dataUI.sisFileId] = -self.dataUI.animationPicking.mousePosition
+                self.buttonTabPickingSetT0.setChecked(False)
             else:
-                self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
-                self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition*0.03 # Default error is 3%
+                if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
+                    self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                else:
+                    self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
+                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition*0.03 # Default error is 3%
             self.dataUI.animationPicking.changedSelect = True
         if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
             if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
@@ -403,7 +442,7 @@ class Window(QMainWindow):
         # Get axis variables
         deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
         nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
-        timeSEG2 = np.arange(self.dataUI.beginTime, self.dataUI.beginTime+nbPoints*deltaT, deltaT)
+        timeSEG2 = np.arange(self.dataUI.beginTime[self.dataUI.sisFileId], self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
         # Change plot to go at the correct position:
         axZoom.clear()
         idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition+150*deltaT)
@@ -437,7 +476,7 @@ class Window(QMainWindow):
         # Get axis variables
         deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
         nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
-        timeSEG2 = np.arange(self.dataUI.beginTime, self.dataUI.beginTime+nbPoints*deltaT, deltaT)
+        timeSEG2 = np.arange(self.dataUI.beginTime[self.dataUI.sisFileId], self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
         if self.dataUI.animationPicking.changedSelect:
             # Change red graph + pick
             if not(self.dataUI.animationPicking.first):
@@ -473,66 +512,69 @@ class Window(QMainWindow):
         self.statusBar.showMessage('Openning Geometry file . . .')
         ## Opening the geometry file:
         fname, _ = QFileDialog.getOpenFileName(self,'Open geometry file',filter='Geometry file (*.geometry)')# The first argument returned is the filename and path
-        headTail = os.path.split(fname)
-        path = headTail[0]
-        file = headTail[1]
-        # nameSave = file[:-9] # remove the *.geometry
-        # Retreive the datafiles names:
-        SEG2Files = []
-        SourcePosition = []
-        ReceiversPosition = []
-        sources = False
-        receivers = False
-        with open(fname) as f:
-            Lines = f.read().splitlines()
-        for line in Lines:
-            if line.startswith("SOURCES"):
-                sources = True
-                receivers = False
-            elif line.startswith("RECEIVERS"):
-                sources = False
-                receivers = True
+        if fname != "":
+            headTail = os.path.split(fname)
+            path = headTail[0]
+            file = headTail[1]
+            # nameSave = file[:-9] # remove the *.geometry
+            # Retreive the datafiles names:
+            SEG2Files = []
+            SourcePosition = []
+            ReceiversPosition = []
+            sources = False
+            receivers = False
+            with open(fname) as f:
+                Lines = f.read().splitlines()
+            for line in Lines:
+                if line.startswith("SOURCES"):
+                    sources = True
+                    receivers = False
+                elif line.startswith("RECEIVERS"):
+                    sources = False
+                    receivers = True
+                else:
+                    if sources:
+                        tmp = re.split(r'\t+', line)
+                        name = tmp[0]
+                        CurrSource = [float(i) for i in tmp[1:]]
+                        SEG2Files.append(name)
+                        SourcePosition.append(CurrSource)
+                    elif receivers:
+                        CurrReceiver = [float(i) for i in re.split(r'\t+', line)]
+                        ReceiversPosition.append(CurrReceiver)
+            # Check if Sources in List of Receivers --> Constitute Sensors array for output file:
+            sensors = deepcopy(ReceiversPosition)
+            sourcesId = np.zeros((len(SourcePosition),))
+            i = 0
+            for source in SourcePosition:
+                if not(ReceiversPosition.count(source) == 1): # If the source is not in the receivers array
+                    sensors.append(source)
+                sourcesId[i] = sensors.index(source) # We store the position of the Id position of the current source in the sensor array
+                i += 1
+        
+            if self.dataUI.dataLoaded == True:
+                reply = QMessageBox.question(self, 'Overwritting data . . .', 'Are you sure you want to overwrite the current dataset?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                if reply == QMessageBox.Yes:
+                    ## Setting up the paths:
+                    self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
+
+                    ## Updating status bar
+                    self.dataUI.dataLoaded = True
+                    self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
+                else:
+                    self.statusBar.showMessage(f'No data loaded')
             else:
-                if sources:
-                    tmp = re.split(r'\t+', line)
-                    name = tmp[0]
-                    CurrSource = [float(i) for i in tmp[1:]]
-                    SEG2Files.append(name)
-                    SourcePosition.append(CurrSource)
-                elif receivers:
-                    CurrReceiver = [float(i) for i in re.split(r'\t+', line)]
-                    ReceiversPosition.append(CurrReceiver)
-        # Check if Sources in List of Receivers --> Constitute Sensors array for output file:
-        sensors = deepcopy(ReceiversPosition)
-        sourcesId = np.zeros((len(SourcePosition),))
-        i = 0
-        for source in SourcePosition:
-            if not(ReceiversPosition.count(source) == 1): # If the source is not in the receivers array
-                sensors.append(source)
-            sourcesId[i] = sensors.index(source) # We store the position of the Id position of the current source in the sensor array
-            i += 1
-    
-        if self.dataUI.dataLoaded == True:
-            reply = QMessageBox.question(self, 'Overwritting data . . .', 'Are you sure you want to overwrite the current dataset?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-            if reply == QMessageBox.Yes:
-                ## Setting up the paths:
                 self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
 
                 ## Updating status bar
                 self.dataUI.dataLoaded = True
                 self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
-            else:
-                self.statusBar.showMessage(f'No data loaded')
+            
+            ## Return to the picking tab
+            self.updateTab0()
+            self.tabs.setCurrentIndex(0)
         else:
-            self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
-
-            ## Updating status bar
-            self.dataUI.dataLoaded = True
-            self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
-        
-        ## Return to the picking tab
-        self.updateTab0()
-        self.tabs.setCurrentIndex(0)
+            self.statusBar.showMessage('No file loaded!')
 
     def saveDataUI(self, path, file, SEG2Files, ReceiversPosition, sensors, sourcesId):
         ## Setting up the paths:
@@ -551,13 +593,13 @@ class Window(QMainWindow):
             _, ext = os.path.splitext(name)
             if ext == '.segy' or ext == '.sgy':
                 st = read(os.path.join(path,name), 'SEGY')
-                self.dataUI.beginTime = 0
+                self.dataUI.beginTime.append(0)
             elif ext == '.seg2' or ext == '.sg2':
                 st = read(os.path.join(path,name), 'SEG2')
-                self.dataUI.beginTime = float(st[0].stats.seg2["DELAY"])
+                self.dataUI.beginTime.append(float(st[0].stats.seg2["DELAY"].replace(',', '.')))
             else:
                 st = read(os.path.join(path,name), 'SEG2')
-                self.dataUI.beginTime = float(st[0].stats.seg2["DELAY"])
+                self.dataUI.beginTime.append(float(st[0].stats.seg2["DELAY"].replace(',', '.')))
             if len(st) != len(ReceiversPosition): # If the number of geophones does not match between the loaded array and the gemoetry
                 raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
             self.dataUI.sisData.append(st)
@@ -624,21 +666,25 @@ class Window(QMainWindow):
             pick[1] = newId[oldId.index(pick[1])]
         ## Saving the file:
         fname, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Source-Receiver-Time file (*.sgt)')# The first argument returned is the filename and path
-        f = open(os.path.join(fname),'w')# Create a new file
-        nbSensors = len(sensors)
-        f.write('%d # shot/geophone points\n' % nbSensors)
-        f.write('#x\ty\n')
-        for i in range(nbSensors):
-            f.write('%.2f\t%.2f\n' % (sensors[i][0], sensors[i][1]))
-        nbMeas = len(picksSave)
-        f.write('%d # measurements\n' % nbMeas)
-        f.write('#s\tg\tt\terr\n')
-        for i in range(nbMeas):
-            f.write('%d\t%d\t%f\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]))
-        f.close()
-        self.statusBar.showMessage(defaultStatus)
-        self.filePicksPath.setText(fname)
-        self._initPygimli(fname)
+        if fname != "":
+            f = open(os.path.join(fname),'w')# Create a new file
+            nbSensors = len(sensors)
+            f.write('%d # shot/geophone points\n' % nbSensors)
+            f.write('#x\ty\n')
+            for i in range(nbSensors):
+                f.write('%.2f\t%.2f\n' % (sensors[i][0], sensors[i][1]))
+            nbMeas = len(picksSave)
+            f.write('%d # measurements\n' % nbMeas)
+            f.write('#s\tg\tt\terr\n')
+            for i in range(nbMeas):
+                f.write('%d\t%d\t%f\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]))
+            f.close()
+            self.statusBar.showMessage(defaultStatus)
+            self.filePicksPath.setText(fname)
+            self._initPygimli(fname)
+        else:
+            self.statusBar.showMessage('No file saved!')
+
 
     def _loadPicking(self):
         self.statusBar.showMessage('Loading picking file . . .')
@@ -940,11 +986,84 @@ class Window(QMainWindow):
         self.hodochronesGraph.fig.tight_layout()
         self.hodochronesGraph.draw()
 
-    def _saveModel(self):
-        # TODO
-        self.statusBar.showMessage('Saving current model . . .')
-        time.sleep(10)
-        self.statusBar.showMessage(defaultStatus)
+    # def _saveModel(self):
+    #     # TODO
+    #     self.statusBar.showMessage('Saving current model . . .')
+    #     time.sleep(10)
+    #     self.statusBar.showMessage(defaultStatus)
+
+    def _loadInvMesh(self):
+        # Load an inversion mesh that was already created (*.poly)
+        fName, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='GIMLi mesh file (*.bms)')
+        if fName != "":
+            self.dataUI.invData.mesh = pg.Mesh(fName)
+            self.invModelGraph.axes.cla()
+            pg.show(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
+            self.invModelGraph.draw()
+            self.dataUI.meshLoaded = True
+            self.statusBar.showMessage(f'Mesh loaded from {fName}')
+        else:
+            self.statusBar.showMessage('No mesh could be loaded!')
+
+    def _loadInitModel(self):
+        # Load an existing model as the starting model (*.vector) for the inversion
+        fName, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Result Vector file (*.vector)')
+        if fName != "":
+            self.dataUI.invData.startModel = pg.Vector(np.loadtxt(fName))
+            self.invModelGraph.axes.cla()
+            try:
+                pg.show(self.dataUI.invData.mesh, self.dataUI.invData.startModel, ax=self.invModelGraph.axes)
+                self.invModelGraph.draw()
+                self.statusBar.showMessage(f'Initial model loaded from {fName}')
+            except:
+                QMessageBox.warning(self, 'Warning !', 'The initial model and the current mesh do not match in size!')
+                self.dataUI.invData.startModel = None
+                self.statusBar.showMessage('No initial model loaded!')
+        else:
+            self.statusBar.showMessage('No initial model loaded!')
+
+    def _saveInvMesh(self):
+        # Save the inversion mesh (*.poly)
+        fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='GIMLi mesh file (*.bms)')
+        if fName != "":
+            self.dataUI.invData.mesh.save(fName)
+            self.statusBar.showMessage(f'Mesh saved to {fName}')
+        else:
+            self.statusBar.showMessage('No mesh saved!')
+
+    def _saveInvAsVTK(self):
+        # Save the inversion results into a VTK file (for Paraview)
+        fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Paraview mesh file (*.vtk)')
+        if fName != "":
+            mgr = self.dataUI.invData.manager
+            m = self.dataUI.invData.mesh
+            m.addData("Velocity [m/s]", mgr.model)
+            coverage = mgr.fop.jacobian().transMult(np.ones(mgr.fop.data.size()))
+            m.addData("Coverage [/]", coverage)
+            C = mgr.fop.constraintsRef()
+            m.addData("Standardized Coverage [/]", np.sign(np.absolute(C.transMult(C * coverage))))
+            m.exportVTK(fName)
+            self.statusBar.showMessage(f'Results saved to {fName}')
+        else:
+            self.statusBar.showMessage('Results where NOT saved!')
+
+    def _saveInvResponse(self):
+        # Save the model response for the last iteration (*.vector)
+        fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Response Vector file (*.vector)')
+        if fName != "":
+            np.savetxt(fName, self.dataUI.invData.manager.inv.response)
+            self.statusBar.showMessage(f'Response saved to {fName}')
+        else:
+            self.statusBar.showMessage('Response was NOT saved!')
+
+    def _saveInvResult(self):
+        # Save the model for the last iteration (*.vector)
+        fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Result Vector file (*.vector)')
+        if fName != "":
+            np.savetxt(fName, self.dataUI.invData.manager.model)
+            self.statusBar.showMessage(f'Result saved to {fName}')
+        else:
+            self.statusBar.showMessage('Result was NOT saved!')
     
     def _pickTracesTabUI(self):
         importTab = QWidget(self.tabs)
@@ -978,20 +1097,23 @@ class Window(QMainWindow):
                 labelbottom=False) # labels along the bottom edge are off
         self.aniMain = None
         self.aniZoom = None
-        layout.addWidget(self.zoomGraph,2,10,5,5)
+        layout.addWidget(self.zoomGraph,2,10,4,5)
         self.buttonTabPickingSet = QPushButton('Set picking')
         self.buttonTabPickingReset = QPushButton('Reset picking')
         self.spinBoxCurrSelect = QSpinBox(importTab)
         self.spinBoxCurrSelect.setEnabled(False)
+        self.buttonTabPickingSetT0 = QPushButton('Set t=0')
         textBox = QLabel(importTab)
         textBox.setText('Select the trace number:')
-        layout.addWidget(textBox,7,10,1,5)
-        layout.addWidget(self.spinBoxCurrSelect,8,10,1,5)
+        layout.addWidget(textBox,6,10,1,5)
+        layout.addWidget(self.spinBoxCurrSelect,7,10,1,5)
+        layout.addWidget(self.buttonTabPickingSetT0,8,10,1,5)
         layout.addWidget(self.buttonTabPickingSet,9,10,1,5)
         layout.addWidget(self.buttonTabPickingReset,10,10,1,5)
         self.buttonTabPickingSet.setCheckable(True)
         self.buttonTabPickingSet.clicked.connect(self.setPicking)
         self.buttonTabPickingReset.clicked.connect(self.resetPicking)
+        self.buttonTabPickingSetT0.setCheckable(True)
         importTab.setLayout(layout)
         return importTab
     
@@ -1130,11 +1252,13 @@ class Window(QMainWindow):
             # Creating mesh with mesh parameters:
             # self.dataUI.invData.data = pg.DataContainer(self.filePicksPath.text())
             # self.dataUI.invData.manager = TTMgr(data=self.dataUI.invData.data)
-            self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
+            if self.dataUI.meshLoaded == False or self.dataUI.invData.mesh == None:
+                self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
+                mesh = self.dataUI.invData.mesh
             pgshow(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
             self.invModelGraph.draw()
-            # if (self.dataUI.invData.startModel is None): # and (self.dataUI.invData.startModel.shape()[0]):
-            self.dataUI.invData.setStartModelGradient(data=self.dataUI.invData.data, mesh=self.dataUI.invData.mesh)
+            if (self.dataUI.invData.startModel is None): # and (self.dataUI.invData.startModel.shape()[0]):
+                self.dataUI.invData.setStartModelGradient(data=self.dataUI.invData.data, mesh=self.dataUI.invData.mesh)
             # Running the inversion
             self.dataUI.invData.manager.invert(data = self.dataUI.invData.data,
                                                mesh = self.dataUI.invData.mesh,
@@ -1146,17 +1270,20 @@ class Window(QMainWindow):
             self.invModelGraph.fig.clear()
             self.invModelGraph.axes = self.invModelGraph.fig.add_subplot(111)
             self.fitGraph.axes.cla()
-            drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response)))/np.asarray(self.dataUI.invData.data('t'))*100)
-            self.fitGraph.axes.set_xlabel('x (m)')
+            drawFirstPicks(ax=self.fitGraph.axes, data=self.dataUI.invData.data, tt=(np.abs(np.asarray(self.dataUI.invData.data('t')-np.asarray(self.dataUI.invData.manager.inv.response)))/np.asarray(self.dataUI.invData.data('t')))*100)
+            self.fitGraph.axes.set_xlabel('X (m)')
             self.fitGraph.axes.set_ylabel('Data misfit (%)')
             self.fitGraph.fig.tight_layout()
             self.fitGraph.draw()
             _, cBar = self.dataUI.invData.manager.showResult(ax=self.invModelGraph.axes, cMap='cividis')
+            self.invModelGraph.axes.set_title('Inversion result (chi² = {: .2f}, RMS = {: .2f} %, RRMS = {: .2f} %)'.format(self.dataUI.invData.manager.inv.chi2(), self.dataUI.invData.manager.inv.absrms()*100, self.dataUI.invData.manager.inv.relrms()*100))
             self.invModelGraph.cBar = cBar
             self.dataUI.invData.manager.drawRayPaths(ax=self.invModelGraph.axes, color='w', lw=0.3, alpha=0.5)
             self.invModelGraph.fig.tight_layout()
             self.invModelGraph.draw()
+            self.dataUI.invData.startModel = None
             self.dataUI.inversionDone = True
+            self.dataUI.meshLoaded = False
 
     def _modelTabUI(self):
         '''In this tab , we will propose to draw the hodochrones on top

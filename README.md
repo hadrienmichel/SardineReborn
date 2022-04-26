@@ -12,6 +12,7 @@ Sardine Reborn has several functionalities. All are oriented towards the more pe
   - [Installation](#installation)
   - [Picking](#picking)
   - [Inversion](#inversion)
+    - [Other options:](#other-options)
   - [Modelling](#modelling)
 - [References:](#references)
 
@@ -40,6 +41,8 @@ python Interface.pyw
 The code will launch automatically.
 
 __Attention: the current implementation of the code is not stable to user errors. Save your progresses along the way!__
+
+__Above all, avoid accents and specific characters in the path that leads to your data and saving location as some dependencies of the code cannot work with those!__
 
 ## Picking
 ![Picking window layout](./images/pickingTab.PNG)
@@ -154,6 +157,16 @@ In the case you might already know the geology relatively well, you can set the 
 For the mesh parameters, they will have an impact on the final model that is obtained. The finer the mesh, the better, but the longer to computational time. The deeper the mesh, the lower the chance of interferences from the boundary conditions on the inversion results. However, a finner and bigger mesh will lead to more difficult computations.
 
 When all the parameters are selected, click the `Run inversion` button to run the inversion (using [pyGIMLI](https://www.pygimli.org/)).
+
+### Other options:
+In the `Inversion` menu, you can save the inversion mesh, the inversion results and responses, and the inversion. Those are done using the options:
+- `Load Inversion Mesh`: Load an inversion mesh (GIMLi format)
+- `Load Initial Model`: Load *.vector file that contains the velocities for each cells of the mesh.
+- `Save Inversion Mesh`: Save the current inversion mesh (GIMLi format)
+- `Save the Inverse Response`: Save the last inversion response (travel times)
+- `Save the Inverse Results`: Save the last inversion model (velocities)
+- `Save Inversion as VTK`: Save the inversion results in *vtk to read in paraview for changes in the visualization/ localization at large scale.
+
 
 ![Inversion results displayed](./images/inversionTabFinal.PNG)
 
