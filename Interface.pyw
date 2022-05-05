@@ -519,7 +519,6 @@ class Window(QMainWindow):
                     axMain.plot([currPicking, currPicking], [i-0.5, i+0.5],color='g')
                     axMain.plot([currPicking - currError, currPicking - currError], [i-0.25, i+0.25], ':g')
                     axMain.plot([currPicking + currError, currPicking + currError], [i-0.25, i+0.25], ':g')
-
                 i += 1
             if not(self.dataUI.animationPicking.first):
                 axMain.set_xlim(left=limitsX[0],right=limitsX[1])
