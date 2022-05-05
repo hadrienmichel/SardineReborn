@@ -24,6 +24,8 @@ import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
 from pygimli.physics.traveltime import ratools, drawFirstPicks
 from pygimli.viewer import show as pgshow
+## Imports for saving/reading states:
+import pickle
 ## Imports for the GUI
 from PyQt5.QtWidgets import (
     QApplication,  
@@ -261,6 +263,16 @@ class dataStorage():
         self.beginTime = []
         ## Graphical animation variables:
         self.animationPicking = animationPicking()
+
+class picklingStatus():
+    def __init__(self) -> None:
+        self.paths = paths()
+        self.geometry = geometry()
+        self.sisData = []
+        self.beginTime = []
+        self.picking = []
+        self.pickingError = []
+        self.sisFileId = 0
 class Window(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -297,6 +309,14 @@ class Window(QMainWindow):
         loadPicking.setShortcut('Ctrl+L')
         loadPicking.setStatusTip('Load an existing *.sgt file for inversion')
         loadPicking.triggered.connect(self._loadPicking)
+
+        savePickingStatus = QAction("Save the picking state", self)
+        savePickingStatus.setStatusTip('Save the status into a pickle')
+        savePickingStatus.triggered.connect(self.saveStatePicking)
+
+        loadPickingStatus = QAction("Load a picking state", self)
+        loadPickingStatus.setStatusTip('Load a pickle status')
+        loadPickingStatus.triggered.connect(self.loadStatePicking)
 
         ### Inversion through pigimli:
         loadInvMesh = QAction('Load Inversion Mesh', self)
@@ -335,6 +355,8 @@ class Window(QMainWindow):
         fileMenu.addAction(openFile)
         fileMenu.addAction(savePicking)
         fileMenu.addAction(loadPicking)
+        fileMenu.addAction(savePickingStatus)
+        fileMenu.addAction(loadPickingStatus)
         # fileMenu.addAction(saveModel)
         fileMenu = menuBarInternal.addMenu("Inversion")
         fileMenu.addAction(loadInvMesh)
@@ -526,22 +548,23 @@ class Window(QMainWindow):
             with open(fname) as f:
                 Lines = f.read().splitlines()
             for line in Lines:
-                if line.startswith("SOURCES"):
-                    sources = True
-                    receivers = False
-                elif line.startswith("RECEIVERS"):
-                    sources = False
-                    receivers = True
-                else:
-                    if sources:
-                        tmp = re.split(r'\t+', line)
-                        name = tmp[0]
-                        CurrSource = [float(i) for i in tmp[1:]]
-                        SEG2Files.append(name)
-                        SourcePosition.append(CurrSource)
-                    elif receivers:
-                        CurrReceiver = [float(i) for i in re.split(r'\t+', line)]
-                        ReceiversPosition.append(CurrReceiver)
+                if len(line.strip('\t')) != 0:
+                    if line.startswith("SOURCES"):
+                        sources = True
+                        receivers = False
+                    elif line.startswith("RECEIVERS"):
+                        sources = False
+                        receivers = True
+                    else:
+                        if sources:
+                            tmp = re.split(r'\t+', line.strip('\t'))
+                            name = tmp[0]
+                            CurrSource = [float(i) for i in tmp[1:]]
+                            SEG2Files.append(name)
+                            SourcePosition.append(CurrSource)
+                        elif receivers:
+                            CurrReceiver = [float(i) for i in re.split(r'\t+', line.strip('\t'))]
+                            ReceiversPosition.append(CurrReceiver)
             # Check if Sources in List of Receivers --> Constitute Sensors array for output file:
             sensors = deepcopy(ReceiversPosition)
             sourcesId = np.zeros((len(SourcePosition),))
@@ -1341,6 +1364,59 @@ class Window(QMainWindow):
         modellingTab.setLayout(layout)
         self.aniModelling = None
         return modellingTab
+    
+    def saveStatePicking(self):
+        fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Pickled structure (*.pkl)')
+        if fName != "":
+            dataLoaded = picklingStatus()
+            dataLoaded.paths = self.dataUI.paths
+            dataLoaded.geometry = self.dataUI.geometry
+            dataLoaded.sisData = self.dataUI.sisData
+            dataLoaded.beginTime = self.dataUI.beginTime
+            dataLoaded.picking = self.dataUI.picking
+            dataLoaded.pickingError = self.dataUI.pickingError
+            dataLoaded.sisFileId = self.dataUI.sisFileId
+            file = open(fName, 'wb')
+            pickle.dump(dataLoaded,file)
+            file.close()
+            self.statusBar.showMessage(f'Result saved to {fName}')
+        else:
+            self.statusBar.showMessage('Result was NOT saved!')
+
+    def loadStatePicking(self):
+        fName, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Pickled structure (*.pkl)')
+        if fName != "":
+            file = open(fName, 'rb')
+            dataLoaded = pickle.load(file)
+            file.close()
+            # Assign the different elements :
+            if len(dataLoaded.paths.directory) != 0:
+                if self.dataUI.dataLoaded:
+                    self.aniZoom.event_source.stop()
+                    self.aniMain.event_source.stop()
+                    self.mainGraph.mpl_disconnect(self.connectMouse)
+                    self.mainGraph.mpl_disconnect(self.connectPress)
+                    self.mainGraph.mpl_disconnect(self.connectRelease)
+                self.dataUI.paths = dataLoaded.paths
+                self.dataUI.geometry = dataLoaded.geometry
+                self.dataUI.sisData = dataLoaded.sisData
+                self.dataUI.beginTime = dataLoaded.beginTime
+                self.dataUI.picking = dataLoaded.picking
+                self.dataUI.pickingError = dataLoaded.pickingError
+                self.dataUI.sisFileId = dataLoaded.sisFileId
+                self.dataUI.dataLoaded = True
+                # Change the interface:
+                self.spinBoxCurrSelect.setMinimum(0)
+                self.spinBoxCurrSelect.setMaximum(len(self.dataUI.sisData[0])-1)
+                self.spinBoxCurrSelect.setPrefix('Trace number ')
+                self.spinBoxCurrSelect.valueChanged.connect(self.traceNumberChanged)
+                self.spinBoxCurrSelect.setEnabled(True)
+                self.dataUI.animationPicking.changedSelect = True
+                self.updateTab0()
+            else:
+                self.statusBar.showMessage('Empty strate loaded')
+        else:
+            self.statusBar.showMessage('No status loaded!')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
