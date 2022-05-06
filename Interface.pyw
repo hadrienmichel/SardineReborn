@@ -1,8 +1,9 @@
 ## Imports for the inner functions
+from logging import warning
 import sys
 import os
 import re
-from copy import deepcopy
+from copy import copy, deepcopy
 import numpy as np
 import time
 import matplotlib
@@ -19,6 +20,7 @@ from matplotlib.figure import Figure
 from matplotlib.backend_bases import MouseButton
 ## Imports for the seismic data input
 from obspy import read
+from obspy.signal.trigger import aic_simple
 ## Imports for the data inversion
 import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
@@ -38,6 +40,8 @@ from PyQt5.QtWidgets import (
     QStatusBar,
     QMessageBox,
     QFileDialog,
+    QInputDialog,
+    QProgressBar,
     QComboBox,
     QPushButton,
     QSpinBox,
@@ -247,6 +251,7 @@ class dataStorage():
         ## Data variables:
         self.paths = paths()
         self.geometry = geometry()
+        self.sisDataOriginal = []
         self.sisData = []
         self.picking = []
         self.pickingError = []
@@ -268,6 +273,7 @@ class picklingStatus():
     def __init__(self) -> None:
         self.paths = paths()
         self.geometry = geometry()
+        self.sisDataOriginal = []
         self.sisData = []
         self.beginTime = []
         self.picking = []
@@ -318,6 +324,31 @@ class Window(QMainWindow):
         loadPickingStatus.setStatusTip('Load a pickle status')
         loadPickingStatus.triggered.connect(self.loadStatePicking)
 
+        ### Filtering of the signal:
+        dcFilter = QAction("Apply a DC filter", self)
+        dcFilter.setStatusTip('Apply a DC filter to the signal')
+        dcFilter.triggered.connect(self.dcFilter)
+
+        trimFilter = QAction("Trim the datasets", self)
+        trimFilter.setStatusTip('Apply trimming to the signal')
+        trimFilter.triggered.connect(self.trimFilter)
+
+        highpassFilter = QAction("Apply a high-pass filter", self)
+        highpassFilter.setStatusTip('Apply a high pass filter to the signal')
+        highpassFilter.triggered.connect(self.highpassFilter)
+
+        lowpassFilter = QAction("Apply a low-pass filter", self)
+        lowpassFilter.setStatusTip('Apply a low pass filter to the signal')
+        lowpassFilter.triggered.connect(self.lowpassFilter)
+
+        resetFilters = QAction("Reset the filters", self)
+        resetFilters.setStatusTip('Reset all previously applied filters')
+        resetFilters.triggered.connect(self.resetFilters)
+
+        autoPicking = QAction("Automated picking", self)
+        autoPicking.setStatusTip('Automatically pick the fisrt arrival for each signals ().')
+        autoPicking.triggered.connect(self.autoPicking)
+
         ### Inversion through pigimli:
         loadInvMesh = QAction('Load Inversion Mesh', self)
         loadInvMesh.setStatusTip('Load an inversion mesh that was already created (*.poly)')
@@ -357,6 +388,13 @@ class Window(QMainWindow):
         fileMenu.addAction(loadPicking)
         fileMenu.addAction(savePickingStatus)
         fileMenu.addAction(loadPickingStatus)
+        fileMenu = menuBarInternal.addMenu("Filters")
+        fileMenu.addAction(dcFilter)
+        fileMenu.addAction(trimFilter)
+        fileMenu.addAction(highpassFilter)
+        fileMenu.addAction(lowpassFilter)
+        fileMenu.addAction(resetFilters)
+        fileMenu.addAction(autoPicking)
         # fileMenu.addAction(saveModel)
         fileMenu = menuBarInternal.addMenu("Inversion")
         fileMenu.addAction(loadInvMesh)
@@ -408,7 +446,9 @@ class Window(QMainWindow):
     def onRelease(self, event):
         if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
             if self.buttonTabPickingSetT0.isChecked():
-                self.dataUI.beginTime[self.dataUI.sisFileId] = -self.dataUI.animationPicking.mousePosition
+                self.dataUI.beginTime[self.dataUI.sisFileId] -= self.dataUI.animationPicking.mousePosition
+                # Change all picked signals for this stream:
+                self.dataUI.picking[self.dataUI.sisFileId,:] -= self.dataUI.animationPicking.mousePosition
                 self.buttonTabPickingSetT0.setChecked(False)
             else:
                 if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
@@ -416,7 +456,7 @@ class Window(QMainWindow):
                     self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
                 else:
                     self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
-                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition*0.03 # Default error is 3%
+                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = max(self.dataUI.animationPicking.mousePosition*0.03, 0.000001) # Default error is 3%
             self.dataUI.animationPicking.changedSelect = True
         if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
             if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
@@ -626,6 +666,8 @@ class Window(QMainWindow):
                 raise Exception('The file referenced in the geometry file does not match the geometry of the array!')
             self.dataUI.sisData.append(st)
         
+        self.dataUI.sisDataOriginal = deepcopy(self.dataUI.sisData)
+        # self.filterSignal()
         self.dataUI.picking = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
         self.dataUI.picking[:] = np.nan
         self.dataUI.pickingError = np.empty((len(self.dataUI.paths.seg2Files),len(self.dataUI.sisData[0])))
@@ -635,6 +677,70 @@ class Window(QMainWindow):
         self.spinBoxCurrSelect.setPrefix('Trace number ')
         self.spinBoxCurrSelect.valueChanged.connect(self.traceNumberChanged)
         self.spinBoxCurrSelect.setEnabled(True)
+
+    def dcFilter(self):
+        for st in self.dataUI.sisData:
+            for tr in st:
+                tr.detrend('constant')
+        self.dataUI.animationPicking.changedSelect = True
+
+    def highpassFilter(self):
+        band, ok = QInputDialog.getDouble(self, "High-pass filter", "Frequency [Hz]", 5.0, 0.0, 10000.0)
+        if ok:
+            for st in self.dataUI.sisData:
+                for tr in st:
+                    tr.filter('highpass', freq=band)
+        self.dataUI.animationPicking.changedSelect = True
+
+    def lowpassFilter(self):
+        band, ok = QInputDialog.getDouble(self, "Low-pass filter", "Frequency [Hz]", 100.0, 0.0, 10000.0)
+        if ok:
+            for st in self.dataUI.sisData:
+                for tr in st:
+                    tr.filter('lowpass', freq=band)
+        self.dataUI.animationPicking.changedSelect = True
+
+    def trimFilter(self):
+        deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
+        nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
+        tEnd = self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT
+        trim, ok = QInputDialog.getDouble(self, "Trimming", "Time: ", tEnd/2, 0.0, tEnd, 2)
+        if ok:
+            for st in self.dataUI.sisData:
+                st.trim(starttime=st[0].stats.starttime, endtime=st[0].stats.starttime + trim)
+        self.dataUI.animationPicking.changedSelect = True
+
+    def resetFilters(self):
+        self.dataUI.sisData = deepcopy(self.dataUI.sisDataOriginal)
+        self.dataUI.animationPicking.changedSelect = True
+
+    def filterSignal(self, dcFilter:bool=True, highpass:float=5.0, lowpass:float=100.0):
+        self.dataUI.sisData = deepcopy(self.dataUI.sisDataOriginal)
+        if not(dcFilter) and (highpass > 0.0 or lowpass < np.Inf):
+            QMessageBox.warning(self, 'Warning !', 'Using the lowpass and/or highpass filter\n without the DC filter is not advised!')
+        for st in self.dataUI.sisData:
+            for tr in st:
+                if dcFilter:
+                    tr.detrend('constant')
+                if highpass > 0.0:
+                    tr.filter('highpass', freq=highpass)
+                if lowpass < np.Inf:
+                    tr.filter('lowpass', freq=lowpass)
+        self.dataUI.animationPicking.changedSelect = True
+    
+    def autoPicking(self):
+        pBar = QProgressBar(self)
+        nbTraces = len(self.dataUI.sisData)*len(self.dataUI.sisData[0])
+        pBar.setMaximum(nbTraces)
+        for i, st in enumerate(self.dataUI.sisData):
+            for j, tr in enumerate(st):
+                aic_f = aic_simple(tr.data)
+                p_idx = aic_f.argmin()
+                self.dataUI.picking[i, j] = p_idx/tr.stats.sampling_rate
+                self.dataUI.pickingError[i, j] = max(self.dataUI.picking[i, j] * 0.05, 0.000001)
+                pBar.setValue((i*len(self.dataUI.sisData[0]) + (j)))
+        pBar.close()
+        self.dataUI.animationPicking.changedSelect = True
     
     def traceNumberChanged(self, value):
         self.dataUI.animationPicking.currSelect = value
@@ -711,83 +817,84 @@ class Window(QMainWindow):
     def _loadPicking(self):
         self.statusBar.showMessage('Loading picking file . . .')
         # 1) Load a file with the first arrival:
-        fname, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Source-Receiver-Time file (*.sgt)')
+        fName, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Source-Receiver-Time file (*.sgt)')
         # We retreived a first-arrival file --> geometry of the sensors + first arrivals 
-        with open(fname) as f:
-            lines = f.read().splitlines()
-        markerNbSensors = "# shot/geophone points"
-        markerMeasurements = "# measurements"
-        for line in lines:
-            if line.endswith(markerNbSensors):
-                nbSensors = int(line[:-len(markerNbSensors)])
-                sensors = np.zeros((nbSensors,2))
-                idxSensor = 0
-            elif line.endswith("#x\ty"):
-                pass
-            elif idxSensor < nbSensors:
-                sensors[idxSensor,:] = re.split(r'\t+', line)
-                idxSensor += 1
-            elif line.endswith(markerMeasurements):
-                nbMeasurements = int(line[:-len(markerMeasurements)])
-                measurements = np.zeros((nbMeasurements,4)) # s g t err
-                idxMeas = 0
-            elif line.endswith('#s\tg\tt\terr'):
-                measurements = np.zeros((nbMeasurements,4)) # s g t err
-            elif line.endswith('#s\tg\tt'):
-                measurements = np.zeros((nbMeasurements,3)) # s g t
-            elif idxMeas < nbMeasurements:
-                measurements[idxMeas,:] = re.split(r'\t+', line)
-                idxMeas += 1
-        self.dataUI.modellingData.sensors = sensors
-        self.dataUI.modellingData.measurements = measurements
-        loadPicking = False
-        if self.dataUI.dataLoaded:
-            # Check if the sgt file corresponds to the already loaded dataset (similar array)
-            sensorsInList = True
-            for i in range(nbSensors):
-                currSensor = sensors[i,:]
-                equals = np.all(self.dataUI.geometry.sensors == currSensor, axis=1)
-                if np.sum(equals) < 1:
-                    # The sensor is not in the list
-                    sensorsInList = False
-                    break
-            if sensorsInList:
-                if not(np.all(np.isnan(self.dataUI.picking))):
-                    # Load the picking to add atop the traces:
-                    reply = QMessageBox.question(self, 'Overwritting picking . . .', 'Are you sure you want to overwrite the current picking?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-                    if reply == QMessageBox.Yes:
-                        ## loading the picking:
-                        loadPicking = True
+        if fName != "":
+            with open(fName) as f:
+                lines = f.read().splitlines()
+            markerNbSensors = "# shot/geophone points"
+            markerMeasurements = "# measurements"
+            for line in lines:
+                if line.endswith(markerNbSensors):
+                    nbSensors = int(line[:-len(markerNbSensors)])
+                    sensors = np.zeros((nbSensors,2))
+                    idxSensor = 0
+                elif line.endswith("#x\ty"):
+                    pass
+                elif idxSensor < nbSensors:
+                    sensors[idxSensor,:] = re.split(r'\t+', line)
+                    idxSensor += 1
+                elif line.endswith(markerMeasurements):
+                    nbMeasurements = int(line[:-len(markerMeasurements)])
+                    measurements = np.zeros((nbMeasurements,4)) # s g t err
+                    idxMeas = 0
+                elif line.endswith('#s\tg\tt\terr'):
+                    measurements = np.zeros((nbMeasurements,4)) # s g t err
+                elif line.endswith('#s\tg\tt'):
+                    measurements = np.zeros((nbMeasurements,3)) # s g t
+                elif idxMeas < nbMeasurements:
+                    measurements[idxMeas,:] = re.split(r'\t+', line)
+                    idxMeas += 1
+            self.dataUI.modellingData.sensors = sensors
+            self.dataUI.modellingData.measurements = measurements
+            loadPicking = False
+            if self.dataUI.dataLoaded:
+                # Check if the sgt file corresponds to the already loaded dataset (similar array)
+                sensorsInList = True
+                for i in range(nbSensors):
+                    currSensor = sensors[i,:]
+                    equals = np.all(self.dataUI.geometry.sensors == currSensor, axis=1)
+                    if np.sum(equals) < 1:
+                        # The sensor is not in the list
+                        sensorsInList = False
+                        break
+                if sensorsInList:
+                    if not(np.all(np.isnan(self.dataUI.picking))):
+                        # Load the picking to add atop the traces:
+                        reply = QMessageBox.question(self, 'Overwritting picking . . .', 'Are you sure you want to overwrite the current picking?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                        if reply == QMessageBox.Yes:
+                            ## loading the picking:
+                            loadPicking = True
+                        else:
+                            ## Do nothing for the picking window:
+                            loadPicking = False
+                            self.statusBar.showMessage(f'Data loaded but picking not presented')
                     else:
-                        ## Do nothing for the picking window:
-                        loadPicking = False
-                        self.statusBar.showMessage(f'Data loaded but picking not presented')
-                else:
-                    loadPicking = True
-        if loadPicking:
-            sources = np.asarray(self.dataUI.geometry.sensors)
-            sources = sources[list(self.dataUI.geometry.sourcesId.astype(int)), :]
-            receivers = np.asarray(self.dataUI.geometry.receivers)
-            self.dataUI.pickingError[:] = np.nan
-            self.dataUI.picking[:] = np.nan
-            for i in range(nbMeasurements):
-                sCurr = sensors[int(measurements[i,0])-1,:]
-                rCurr = sensors[int(measurements[i,1])-1,:]
-                pickCurr = measurements[i,2]
-                if len(measurements[i,:]) > 3:
-                    errCurr = measurements[i,3]
-                sId = np.where(np.all(sources == sCurr, axis=1))[0]
-                rId = np.where(np.all(receivers == rCurr, axis=1))[0]
-                self.dataUI.picking[sId, rId] = pickCurr
-                if len(measurements[i,:]) > 3:
-                    self.dataUI.pickingError[sId, rId] = errCurr/pickCurr
-                else:
-                    self.dataUI.pickingError[sId, rId] = 0.03
-            self.statusBar.showMessage(f'Data loaded with picking on graphs')
-            self.dataUI.animationPicking.changedSelect = True
-        self.filePicksPath.setText(fname)
-        self._initPygimli(fname)
-        self._initModelling()
+                        loadPicking = True
+            if loadPicking:
+                sources = np.asarray(self.dataUI.geometry.sensors)
+                sources = sources[list(self.dataUI.geometry.sourcesId.astype(int)), :]
+                receivers = np.asarray(self.dataUI.geometry.receivers)
+                self.dataUI.pickingError[:] = np.nan
+                self.dataUI.picking[:] = np.nan
+                for i in range(nbMeasurements):
+                    sCurr = sensors[int(measurements[i,0])-1,:]
+                    rCurr = sensors[int(measurements[i,1])-1,:]
+                    pickCurr = measurements[i,2]
+                    if len(measurements[i,:]) > 3:
+                        errCurr = measurements[i,3]
+                    sId = np.where(np.all(sources == sCurr, axis=1))[0]
+                    rId = np.where(np.all(receivers == rCurr, axis=1))[0]
+                    self.dataUI.picking[sId, rId] = pickCurr
+                    if len(measurements[i,:]) > 3:
+                        self.dataUI.pickingError[sId, rId] = errCurr/pickCurr
+                    else:
+                        self.dataUI.pickingError[sId, rId] = 0.03
+                self.statusBar.showMessage(f'Data loaded with picking on graphs')
+                self.dataUI.animationPicking.changedSelect = True
+            self.filePicksPath.setText(fName)
+            self._initPygimli(fName)
+            self._initModelling()
     
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
