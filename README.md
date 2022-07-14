@@ -1,4 +1,6 @@
 ![Sardine Reborn Logo](./images/SardineRebornLogo_100ppp.png)
+
+[![DOI](https://zenodo.org/badge/456904646.svg)](https://zenodo.org/badge/latestdoi/456904646)
 # Sardine Reborn
 
 Sardine reborn is a new implementation of the Sardine software (Sardine v 1.0, ULiège (2000)). Sardine originaly stands for Seismic And Radar data INtErpretation.
