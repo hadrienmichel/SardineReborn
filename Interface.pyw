@@ -1,9 +1,15 @@
+## TODO/IDEAS
+# Add slider for zoom control on zoom panel
+# Add option to merge similar sources/receivers at loading of geometry file
+# Add posibilities for auto-picking
+# Add robustness for reading/writing operations
+# Debug Modelling with multiple datasets
+
 ## Imports for the inner functions
-from logging import warning
 import sys
 import os
 import re
-from copy import copy, deepcopy
+from copy import deepcopy
 import numpy as np
 import time
 import matplotlib

@@ -132,3 +132,6 @@ dmypy.json
 env_list.txt
 seg2tosegy.py
 createMesh.py
+
+
+.vscode/
