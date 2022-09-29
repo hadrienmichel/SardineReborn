@@ -593,7 +593,7 @@ class Window(QMainWindow):
             with open(fname) as f:
                 Lines = f.read().splitlines()
             for line in Lines:
-                if len(line.strip('\t')) != 0:
+                if len(line.strip(' \t')) != 0: #The line is stripped of spaces and tab
                     if line.startswith("SOURCES"):
                         sources = True
                         receivers = False
@@ -602,13 +602,13 @@ class Window(QMainWindow):
                         receivers = True
                     else:
                         if sources:
-                            tmp = re.split(r'\t+', line.strip('\t'))
+                            tmp = re.split(r'  +|\t+', line.strip(' \t'))# For robustness --> either tabs or spaces
                             name = tmp[0]
                             CurrSource = [float(i) for i in tmp[1:]]
                             SEG2Files.append(name)
                             SourcePosition.append(CurrSource)
                         elif receivers:
-                            CurrReceiver = [float(i) for i in re.split(r'\t+', line.strip('\t'))]
+                            CurrReceiver = [float(i) for i in re.split(r'  +|\t+', line.strip(' \t'))]# For robustness --> either tabs or spaces
                             ReceiversPosition.append(CurrReceiver)
             # Check if Sources in List of Receivers --> Constitute Sensors array for output file:
             sensors = deepcopy(ReceiversPosition)

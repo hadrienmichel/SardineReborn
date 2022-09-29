@@ -1,6 +1,10 @@
 ![Sardine Reborn Logo](./images/SardineRebornLogo_100ppp.png)
 
-[![DOI](https://zenodo.org/badge/456904646.svg)](https://zenodo.org/badge/latestdoi/456904646)
+[![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/) [![GitHub license](https://img.shields.io/github/license/hadrienmichel/SardineReborn.svg)](https://github.com/hadrienmichel/SardineReborn) 
+
+[![GitHub release](https://img.shields.io/github/release/hadrienmichel/SardineReborn.svg)](https://GitHub.com/hadrienmichel/SardineReborn/releases/) [![DOI](https://zenodo.org/badge/456904646.svg)](https://zenodo.org/badge/latestdoi/456904646)
+
+[![GitHub commits](https://img.shields.io/github/commits-since/hadrienmichel/SardineReborn/v0.3.1.svg)](https://GitHub.com/hadrienmichel/SardineReborn/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/hadrienmichel/SardineReborn)](https://GitHub.com/hadrienmichel/SardineReborn/commit/)
 # Sardine Reborn
 
 Sardine reborn is a new implementation of the Sardine software (Sardine v 1.0, ULiège (2000)). Sardine originaly stands for Seismic And Radar data INtErpretation.
@@ -17,6 +21,7 @@ Sardine Reborn has several functionalities. All are oriented towards the more pe
     - [Other options:](#other-options)
   - [Modelling](#modelling)
 - [References:](#references)
+- [Troubleshooting:](#troubleshooting)
 
 Each of those functionalities have a dedicated tab in the UI. The user can save picking and models, as well as figures that are produced. 
 
@@ -200,3 +205,13 @@ This code relies on several python libraries appart from the common numpy, matpl
 
     Rücker, C., Günther, T., Wagner, F.M., 2017. [pyGIMLi: An open-source library for modelling and inversion in geophysics](http://www.sciencedirect.com/science/article/pii/S0098300417300584/pdfft?md5=44253eaacd5490e3fb32210671672496&pid=1-s2.0-S0098300417300584-main.pdf), _Computers and Geosciences_, 109, 106-123, doi:`10.1016/j.cageo.2017.07.011`.
 
+# Troubleshooting:
+Here are some common issues that can arise and how to troubelshoot them.
+
+- I cannot read my seg2 files, even though they are correctly stated in the `*.geometry` file:
+
+    The reading operations are performed using obspy.read. In case the seg2 file was written on a computer that is not setup in English, this can lead to inconsistancies in the date-time reading as those can be written in your language and not in English. 
+
+    You can change this behaviour by adding the abbreviations for your language in the `header.py` file of obspy (`...\obspy\io\seg2\header.py`). In case this does not resolve the issue, report back and create an issue with the `*.geometry` file, the `*.seg2` file and a log of the error message that was provided in your terminal.
+
+- More to be added... Please report issues you might enconter to help improve the code.
