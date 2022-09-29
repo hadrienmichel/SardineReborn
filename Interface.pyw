@@ -968,7 +968,7 @@ class Window(QMainWindow):
                     nbLayers = self.dataUI.modellingData.nbLayers
                     orientation = -1
                     appVel.append(np.linspace(600, 2000, nbLayers))
-                    intercept.append(np.linspace(0.05, 0.1, nbLayers))
+                    intercept.append(np.linspace(0.0, 0.015, nbLayers))
                     points = np.zeros((nbLayers+1,2))
                     points[0,0] = sourceX
                     for i in range(nbLayers):
@@ -998,7 +998,7 @@ class Window(QMainWindow):
                     nbLayers = self.dataUI.modellingData.nbLayers
                     orientation = 1
                     appVel.append(np.linspace(600, 2000, nbLayers))
-                    intercept.append(np.linspace(0.05, 0.1, nbLayers))
+                    intercept.append(np.linspace(0.0, 0.015, nbLayers))
                     points = np.zeros((nbLayers+1,2))
                     points[0,0] = sourceX
                     for i in range(nbLayers):
