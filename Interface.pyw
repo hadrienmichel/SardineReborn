@@ -958,18 +958,62 @@ class Window(QMainWindow):
                 orientationsText.append('Left')
                 orientations.append(-1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, -1])
-                inter, v, points = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
-                appVel.append(v)
-                intercept.append(inter)
-                hodoPts.append(points)
+                try:
+                    inter, v, points = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
+                    appVel.append(v)
+                    intercept.append(inter)
+                    hodoPts.append(points)
+                except:
+                    QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
+                    nbLayers = self.dataUI.modellingData.nbLayers
+                    orientation = -1
+                    appVel.append(np.linspace(600, 2000, nbLayers))
+                    intercept.append(np.linspace(0.05, 0.1, nbLayers))
+                    points = np.zeros((nbLayers+1,2))
+                    points[0,0] = sourceX
+                    for i in range(nbLayers):
+                        if i < nbLayers-1:
+                            xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
+                            tTemp = inter[i] + xTemp*(1/v[i])
+                            points[i+1,0] = sourceX + orientation*xTemp
+                            points[i+1,1] = tTemp
+                        else:
+                            if orientation > 0:
+                                points[i+1,0] = max(receiversX)
+                            else:
+                                points[i+1,0] = min(receiversX)
+                            points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
+                    hodoPts.append(points)
             if receiversRight.size != 0:
                 orientationsText.append('Right')
                 orientations.append(1)
                 self.dataUI.modellingData.combinationSR.append([sourceX, 1])
-                inter, v, points = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
-                appVel.append(v)
-                intercept.append(inter)
-                hodoPts.append(points)
+                try:
+                    inter, v, points = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
+                    appVel.append(v)
+                    intercept.append(inter)
+                    hodoPts.append(points)
+                except:
+                    QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
+                    nbLayers = self.dataUI.modellingData.nbLayers
+                    orientation = 1
+                    appVel.append(np.linspace(600, 2000, nbLayers))
+                    intercept.append(np.linspace(0.05, 0.1, nbLayers))
+                    points = np.zeros((nbLayers+1,2))
+                    points[0,0] = sourceX
+                    for i in range(nbLayers):
+                        if i < nbLayers-1:
+                            xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
+                            tTemp = inter[i] + xTemp*(1/v[i])
+                            points[i+1,0] = sourceX + orientation*xTemp
+                            points[i+1,1] = tTemp
+                        else:
+                            if orientation > 0:
+                                points[i+1,0] = max(receiversX)
+                            else:
+                                points[i+1,0] = min(receiversX)
+                            points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
+                    hodoPts.append(points)
             self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
             self.dataUI.modellingData.appVelocities.append(appVel)
             self.dataUI.modellingData.interceptTime.append(intercept)
