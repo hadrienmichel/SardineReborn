@@ -4,7 +4,7 @@
 
 [![GitHub release](https://img.shields.io/github/release/hadrienmichel/SardineReborn.svg)](https://GitHub.com/hadrienmichel/SardineReborn/releases/) [![DOI](https://zenodo.org/badge/456904646.svg)](https://zenodo.org/badge/latestdoi/456904646)
 
-[![GitHub commits](https://img.shields.io/github/commits-since/hadrienmichel/SardineReborn/v0.3.1.svg)](https://GitHub.com/hadrienmichel/SardineReborn/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/hadrienmichel/SardineReborn)](https://GitHub.com/hadrienmichel/SardineReborn/commit/)
+[![GitHub commits](https://img.shields.io/github/commits-since/hadrienmichel/SardineReborn/latest.svg)](https://GitHub.com/hadrienmichel/SardineReborn/commit/) [![GitHub latest commit](https://badgen.net/github/last-commit/hadrienmichel/SardineReborn)](https://GitHub.com/hadrienmichel/SardineReborn/commit/)
 # Sardine Reborn
 
 Sardine reborn is a new implementation of the Sardine software (Sardine v 1.0, ULiège (2000)). Sardine originaly stands for Seismic And Radar data INtErpretation.
