@@ -460,6 +460,7 @@ class Window(QMainWindow):
                 if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
                     self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
                     self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                    QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
                 else:
                     self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
                     self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = max(self.dataUI.animationPicking.mousePosition*0.03, 0.000001) # Default error is 3%
@@ -515,7 +516,8 @@ class Window(QMainWindow):
         axZoom.clear()
         idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition+150*deltaT)
         timeZoom = timeSEG2[idx]
-        axZoom.axhline(y=0, color=[0.5, 0.5, 0.5])
+        axZoom.axhline(y=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
+        axZoom.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
         axZoom.plot(timeZoom,self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx],color='k')
         axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition-150*deltaT,right=self.dataUI.animationPicking.mousePosition+150*deltaT)
         axZoom.autoscale(axis='y')
@@ -553,9 +555,11 @@ class Window(QMainWindow):
                 limitsX = axMain.get_xlim()
             axMain.clear()
             i = 0
+            axMain.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
             for tr in self.dataUI.sisData[self.dataUI.sisFileId]:
                 data = tr.data 
                 data = data/(max(data)-min(data))+i
+                axMain.axhline(y=i, linewidth=0.5, color=[0.5, 0.5, 0.5])
                 if i == self.dataUI.animationPicking.currSelect:
                     axMain.plot(timeSEG2,data,color='r')
                 else:
