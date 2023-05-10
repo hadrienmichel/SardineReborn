@@ -515,6 +515,7 @@ class Window(QMainWindow):
         axZoom.clear()
         idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition+150*deltaT)
         timeZoom = timeSEG2[idx]
+        axZoom.axhline(y=0, color=[0.5, 0.5, 0.5])
         axZoom.plot(timeZoom,self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx],color='k')
         axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition-150*deltaT,right=self.dataUI.animationPicking.mousePosition+150*deltaT)
         axZoom.autoscale(axis='y')
