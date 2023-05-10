@@ -783,7 +783,7 @@ class Window(QMainWindow):
                 rId = int(sensors.index(receivers[i]))
                 if sId != rId: # The traveltime for source = receiever is 0 and not usefull for inversion!
                     t = self.dataUI.picking[nbFile, i]
-                    err = self.dataUI.pickingError[nbFile, i] * t
+                    err = max([self.dataUI.pickingError[nbFile, i] * t, 0.000001])# Avoid the error with null error in inversion
                     if not(np.isnan(t)):
                         picksSave.append([sId, rId, t, err])
         # Remove unused sensors from the list:
@@ -928,105 +928,108 @@ class Window(QMainWindow):
             QMessageBox.warning(self, 'Warning !', 'Impossible to model using the intercept time method!\nNo topography authorized.')
             return
         # Initialize the modelling:
-        self.dataUI.modellingData.nbLayers = self.nbLayersSelector.value()
-        self.dataUI.modellingData.hodoPoints = []
-        self.dataUI.modellingData.combinationSR = []
-        self.dataUI.modellingData.sourcesX = []
-        self.dataUI.modellingData.appVelocities = []
-        self.dataUI.modellingData.interceptTime = []
-        self.dataUI.modellingData.orientations = []
-        # Gather the possible sources and orientations:
-        self.dataUI.modellingAnimation.namesSources = []
-        self.dataUI.modellingAnimation.namesOrientations = []
-        sources = np.unique(measurements[:,0]).astype(int)
-        for sId in sources:
-            sourceX = sensors[sId-1,0]
-            self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
-            self.dataUI.modellingData.sourcesX.append(sourceX)
-            index = measurements[:,0].astype(int) == sId
-            sourceX = sensors[sId-1, 0]
-            receiversX = sensors[measurements[index, 1].astype(int) - 1, 0]
-            times = measurements[index, 2]
-            receiversLeft = receiversX[receiversX < sourceX]
-            receiversRight = receiversX[receiversX > sourceX]
-            orientationsText = []
-            orientations = []
-            appVel = []
-            intercept = []
-            hodoPts = []
-            if receiversLeft.size != 0:
-                orientationsText.append('Left')
-                orientations.append(-1)
-                self.dataUI.modellingData.combinationSR.append([sourceX, -1])
-                try:
-                    inter, v, points = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
-                    appVel.append(v)
-                    intercept.append(inter)
-                    hodoPts.append(points)
-                except:
-                    QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
-                    nbLayers = self.dataUI.modellingData.nbLayers
-                    orientation = -1
-                    appVel.append(np.linspace(600, 2000, nbLayers))
-                    intercept.append(np.linspace(0.0, 0.015, nbLayers))
-                    points = np.zeros((nbLayers+1,2))
-                    points[0,0] = sourceX
-                    for i in range(nbLayers):
-                        if i < nbLayers-1:
-                            xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
-                            tTemp = inter[i] + xTemp*(1/v[i])
-                            points[i+1,0] = sourceX + orientation*xTemp
-                            points[i+1,1] = tTemp
-                        else:
-                            if orientation > 0:
-                                points[i+1,0] = max(receiversX)
+        try:
+            self.dataUI.modellingData.nbLayers = self.nbLayersSelector.value()
+            self.dataUI.modellingData.hodoPoints = []
+            self.dataUI.modellingData.combinationSR = []
+            self.dataUI.modellingData.sourcesX = []
+            self.dataUI.modellingData.appVelocities = []
+            self.dataUI.modellingData.interceptTime = []
+            self.dataUI.modellingData.orientations = []
+            # Gather the possible sources and orientations:
+            self.dataUI.modellingAnimation.namesSources = []
+            self.dataUI.modellingAnimation.namesOrientations = []
+            sources = np.unique(measurements[:,0]).astype(int)
+            for sId in sources:
+                sourceX = sensors[sId-1,0]
+                self.dataUI.modellingAnimation.namesSources.append(f'Source at {sourceX} m.')
+                self.dataUI.modellingData.sourcesX.append(sourceX)
+                index = measurements[:,0].astype(int) == sId
+                sourceX = sensors[sId-1, 0]
+                receiversX = sensors[measurements[index, 1].astype(int) - 1, 0]
+                times = measurements[index, 2]
+                receiversLeft = receiversX[receiversX < sourceX]
+                receiversRight = receiversX[receiversX > sourceX]
+                orientationsText = []
+                orientations = []
+                appVel = []
+                intercept = []
+                hodoPts = []
+                if receiversLeft.size != 0:
+                    orientationsText.append('Left')
+                    orientations.append(-1)
+                    self.dataUI.modellingData.combinationSR.append([sourceX, -1])
+                    try:
+                        inter, v, points = buildModel(sourceX, receiversLeft, times[receiversX < sourceX], self.dataUI.modellingData.nbLayers, -1)
+                        appVel.append(v)
+                        intercept.append(inter)
+                        hodoPts.append(points)
+                    except:
+                        QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
+                        nbLayers = self.dataUI.modellingData.nbLayers
+                        orientation = -1
+                        appVel.append(np.linspace(600, 2000, nbLayers))
+                        intercept.append(np.linspace(0.0, 0.015, nbLayers))
+                        points = np.zeros((nbLayers+1,2))
+                        points[0,0] = sourceX
+                        for i in range(nbLayers):
+                            if i < nbLayers-1:
+                                xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
+                                tTemp = inter[i] + xTemp*(1/v[i])
+                                points[i+1,0] = sourceX + orientation*xTemp
+                                points[i+1,1] = tTemp
                             else:
-                                points[i+1,0] = min(receiversX)
-                            points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
-                    hodoPts.append(points)
-            if receiversRight.size != 0:
-                orientationsText.append('Right')
-                orientations.append(1)
-                self.dataUI.modellingData.combinationSR.append([sourceX, 1])
-                try:
-                    inter, v, points = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
-                    appVel.append(v)
-                    intercept.append(inter)
-                    hodoPts.append(points)
-                except:
-                    QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
-                    nbLayers = self.dataUI.modellingData.nbLayers
-                    orientation = 1
-                    appVel.append(np.linspace(600, 2000, nbLayers))
-                    intercept.append(np.linspace(0.0, 0.015, nbLayers))
-                    points = np.zeros((nbLayers+1,2))
-                    points[0,0] = sourceX
-                    for i in range(nbLayers):
-                        if i < nbLayers-1:
-                            xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
-                            tTemp = inter[i] + xTemp*(1/v[i])
-                            points[i+1,0] = sourceX + orientation*xTemp
-                            points[i+1,1] = tTemp
-                        else:
-                            if orientation > 0:
-                                points[i+1,0] = max(receiversX)
+                                if orientation > 0:
+                                    points[i+1,0] = max(receiversX)
+                                else:
+                                    points[i+1,0] = min(receiversX)
+                                points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
+                        hodoPts.append(points)
+                if receiversRight.size != 0:
+                    orientationsText.append('Right')
+                    orientations.append(1)
+                    self.dataUI.modellingData.combinationSR.append([sourceX, 1])
+                    try:
+                        inter, v, points = buildModel(sourceX, receiversRight, times[receiversX > sourceX], self.dataUI.modellingData.nbLayers, 1)
+                        appVel.append(v)
+                        intercept.append(inter)
+                        hodoPts.append(points)
+                    except:
+                        QMessageBox.warning(self, 'Warning !', 'Impossible to automatically model!')
+                        nbLayers = self.dataUI.modellingData.nbLayers
+                        orientation = 1
+                        appVel.append(np.linspace(600, 2000, nbLayers))
+                        intercept.append(np.linspace(0.0, 0.015, nbLayers))
+                        points = np.zeros((nbLayers+1,2))
+                        points[0,0] = sourceX
+                        for i in range(nbLayers):
+                            if i < nbLayers-1:
+                                xTemp = (inter[i]-inter[i+1])/((1/v[i+1])-(1/v[i]))
+                                tTemp = inter[i] + xTemp*(1/v[i])
+                                points[i+1,0] = sourceX + orientation*xTemp
+                                points[i+1,1] = tTemp
                             else:
-                                points[i+1,0] = min(receiversX)
-                            points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
-                    hodoPts.append(points)
-            self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
-            self.dataUI.modellingData.appVelocities.append(appVel)
-            self.dataUI.modellingData.interceptTime.append(intercept)
-            self.dataUI.modellingData.orientations.append(orientations)
-            self.dataUI.modellingData.hodoPoints.append(hodoPts)
-        self._updateHodoGraph()
-        self._updateModelGraph()
-        # Implement the source/receiver selector:
-        self.sourceSelector.clear()
-        self.receiversSelector.clear()
-        self.sourceSelector.addItems(self.dataUI.modellingAnimation.namesSources)
-        self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
-        self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
+                                if orientation > 0:
+                                    points[i+1,0] = max(receiversX)
+                                else:
+                                    points[i+1,0] = min(receiversX)
+                                points[i+1,1] = inter[-1] + np.abs(sourceX - points[i+1,0])*(1/v[-1])
+                        hodoPts.append(points)
+                self.dataUI.modellingAnimation.namesOrientations.append(orientationsText)
+                self.dataUI.modellingData.appVelocities.append(appVel)
+                self.dataUI.modellingData.interceptTime.append(intercept)
+                self.dataUI.modellingData.orientations.append(orientations)
+                self.dataUI.modellingData.hodoPoints.append(hodoPts)
+            self._updateHodoGraph()
+            self._updateModelGraph()
+            # Implement the source/receiver selector:
+            self.sourceSelector.clear()
+            self.receiversSelector.clear()
+            self.sourceSelector.addItems(self.dataUI.modellingAnimation.namesSources)
+            self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
+            self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
+        except:
+            QMessageBox.warning(self, 'Warning !', 'Impossible to model using the intercept time method!\nThe robustness of this method needs to be imporved.')
     
     def _updateHodoGraph(self):
         axHod = self.hodochronesGraph.axes
