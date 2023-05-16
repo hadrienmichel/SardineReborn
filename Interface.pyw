@@ -1,9 +1,11 @@
 ## TODO/IDEAS
-# Add slider for zoom control on zoom panel
-# Add option to merge similar sources/receivers at loading of geometry file
+# Add option to merge similar sources/receivers at loading of geometry file (new files to add with similar paths (roll-along support))
 # Add posibilities for auto-picking
-# Add robustness for reading/writing operations
-# Debug Modelling with multiple datasets
+# Debug Modelling with multiple datasets (To Test)
+# Add option to visualize the FFT of the datasets (DONE on 16-05-2023)
+# Add option to pick along a line (DONE on 15-05-2023)
+# Add option to change the header (dt for example)
+# Add options for setting t0 : by value, by graphical picking, by line picking (automated?)
 
 ## Imports for the inner functions
 import sys
@@ -36,7 +38,7 @@ from pygimli.viewer import show as pgshow
 import pickle
 ## Imports for the GUI
 from PyQt5.QtWidgets import (
-    QApplication,  
+    QApplication,
     QWidget,
     QTabWidget,
     QVBoxLayout,
@@ -177,6 +179,17 @@ class MplCanvas(FigureCanvasQTAgg):
         self.cBar = None # For the (eventual) colorbar
         super(MplCanvas, self).__init__(self.fig)
         self.setParent(parent)
+        self.homeXLimits = (0,3)
+        self.homeYLimits = (0,24)
+
+class CustomHomeToolbar(NavigationToolbar2QT):
+    def __init__(self, canvas, parent):
+        super().__init__(canvas, parent)
+    
+    def home(self):
+        self.canvas.axes.set_xlim(*self.canvas.homeXLimits)
+        self.canvas.axes.set_ylim(*self.canvas.homeYLimits)
+        self.canvas.draw_idle()
 
 # class VerticalNavigationToolbar2QT(NavigationToolbar2QT):
 #     def __init__(self, canvas, parent, coordinates=True):
@@ -207,11 +220,15 @@ class model():
 class animationPicking():
     def __init__(self) -> None:
         self.timeOnClick = 0        # To know if the click is in fixed position of to pan/zoom
-        self.mousePosition = 0      # Storing the current position of the mouse
+        self.mousePosition = [0,0]      # Storing the current position of the mouse
         self.currSelect = 0         # Storing the current trace number beiing analyzed
         self.changedSelect = True   # Variable to tell if the trace selected is different
         self.first = True           # Variable to tell if plotting for the first time
         self.maxClickLength = 0.5   # Maximum time (in sec) to consider a click on place
+        self.notPicking = True      # Checking if currently picking of not (zooming or panning)
+        self.fftShowed = False      # Checking that the fft is beiing displayed (true) or not (false)
+        self.fftAnim = None
+        self.mousePositionInit = [0,0]  # Storing the initial position of the mouse when registering a mouse-click
 class inversionData():
     def __init__(self) -> None:
         self.lam = 20.0
@@ -331,6 +348,10 @@ class Window(QMainWindow):
         loadPickingStatus.triggered.connect(self.loadStatePicking)
 
         ### Filtering of the signal:
+        fftGraph = QAction("Show FFT of dataset", self)
+        fftGraph.setStatusTip('Show the FFT transform of the different traces')
+        fftGraph.triggered.connect(self.fftGraph)
+
         dcFilter = QAction("Apply a DC filter", self)
         dcFilter.setStatusTip('Apply a DC filter to the signal')
         dcFilter.triggered.connect(self.dcFilter)
@@ -395,6 +416,7 @@ class Window(QMainWindow):
         fileMenu.addAction(savePickingStatus)
         fileMenu.addAction(loadPickingStatus)
         fileMenu = menuBarInternal.addMenu("Filters")
+        fileMenu.addAction(fftGraph)
         fileMenu.addAction(dcFilter)
         fileMenu.addAction(trimFilter)
         fileMenu.addAction(highpassFilter)
@@ -414,8 +436,7 @@ class Window(QMainWindow):
         self.statusBar = QStatusBar(self)
         self.statusBar.showMessage(defaultStatus)
         self.setStatusBar(self.statusBar)
-
-        pass
+        self.dataUI.animationPicking.fftAnim = fftGraph # Adding easy access to fftGraph action for changes in name and tip
 
     ## Oppening and closing message boxes:
     def showEvent(self, event):
@@ -441,36 +462,69 @@ class Window(QMainWindow):
     # Matplotlib animations:
     def changeMouse(self, event):
         if event.inaxes is not None:
-            self.dataUI.animationPicking.mousePosition = event.xdata
+            self.dataUI.animationPicking.mousePosition = [event.xdata, event.ydata]
         return 0
 
     def onPress(self, event): # For both windows
         if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
+            # Checking if the zoom or pan tools are checked to enable line-picking
+            toolbarState = self.mainGraph.fig.canvas.toolbar.mode
+            toolbarOptions = type(toolbarState)
+            if toolbarState == toolbarOptions.ZOOM or toolbarState == toolbarOptions.PAN:
+                self.dataUI.animationPicking.notPicking = True
+            else:
+                self.dataUI.animationPicking.notPicking = False
+                self.dataUI.animationPicking.mousePositionInit = self.dataUI.animationPicking.mousePosition
         return 0
 
     def onRelease(self, event):
-        if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
-            if self.buttonTabPickingSetT0.isChecked():
-                self.dataUI.beginTime[self.dataUI.sisFileId] -= self.dataUI.animationPicking.mousePosition
-                # Change all picked signals for this stream:
-                self.dataUI.picking[self.dataUI.sisFileId,:] -= self.dataUI.animationPicking.mousePosition
-                self.buttonTabPickingSetT0.setChecked(False)
-            else:
-                if self.dataUI.animationPicking.mousePosition < 0: # To remove a picked trace, click on times below 0
-                    self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
-                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
-                    QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
+        if not(self.dataUI.animationPicking.notPicking):
+            if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If left click and not dragging accross the pannel
+                if self.buttonTabPickingSetT0.isChecked():
+                    self.dataUI.beginTime[self.dataUI.sisFileId] -= self.dataUI.animationPicking.mousePosition[0]
+                    # Change all picked signals for this stream:
+                    self.dataUI.picking[self.dataUI.sisFileId,:] -= self.dataUI.animationPicking.mousePosition[0]
+                    self.buttonTabPickingSetT0.setChecked(False)
                 else:
-                    self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition
-                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = max(self.dataUI.animationPicking.mousePosition*0.03, 0.000001) # Default error is 3%
-            self.dataUI.animationPicking.changedSelect = True
-        if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
-            if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
-                if self.dataUI.animationPicking.mousePosition > 0:
-                    self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.abs(self.dataUI.animationPicking.mousePosition-self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])/self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] # Default error is 3%
-                    self.dataUI.animationPicking.changedSelect = True
+                    if self.dataUI.animationPicking.mousePosition[0] < 0: # To remove a picked trace, click on times below 0
+                        self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
+                        QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
+                    else:
+                        self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition[0]
+                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = max(self.dataUI.animationPicking.mousePosition[0]*0.03, 0.000001) # Default error is 3%
+                self.dataUI.animationPicking.changedSelect = True
+            else:
+                yPicks = [self.dataUI.animationPicking.mousePositionInit[1], self.dataUI.animationPicking.mousePosition[1]]
+                xPicks = [self.dataUI.animationPicking.mousePositionInit[0], self.dataUI.animationPicking.mousePosition[0]]
+                if np.abs(yPicks[0]-yPicks[1]) > 1: 
+                    # The picking concerns multiple traces.
+                    idMin, idMax = np.argmin(yPicks), np.argmax(yPicks)
+                    minPick = np.max([0, np.ceil(yPicks[idMin])])
+                    maxPick = np.min([np.floor(yPicks[idMax]), len(self.dataUI.sisData[0])-1])
+                    for currPick in np.arange(minPick, maxPick+1, dtype=np.int16):
+                        # Find x (time) for the given y (currPick). 
+                        m = (xPicks[idMax]-xPicks[idMin])/(yPicks[idMax]-yPicks[idMin])
+                        timePick = m*(currPick-yPicks[idMin]) + xPicks[idMin]
+                        if timePick > 0:
+                            self.dataUI.picking[self.dataUI.sisFileId, currPick] = timePick
+                            self.dataUI.pickingError[self.dataUI.sisFileId, currPick] = max(timePick*0.03, 0.000001) # Default error is 3%
+                self.dataUI.animationPicking.changedSelect = True
+            if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
+                if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
+                    if self.dataUI.animationPicking.mousePosition[0] > 0:
+                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.abs(self.dataUI.animationPicking.mousePosition[0]-self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])/self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] # Default error is 3%
+                        self.dataUI.animationPicking.changedSelect = True
+        else:
+            self.dataUI.animationPicking.changedSelect = True # Update the graph anyway for zoom in and pan updates
+        self.dataUI.animationPicking.notPicking=True # Picking is done for now, waiting for next click
         return 0
+
+    def onKeyPress(self, event):
+        print(event.key)
+        # if event.key == "left" or event.key == "down":
+        #     print('')
     
     def onPressModelling(self, event):
         if event.button == MouseButton.LEFT:
@@ -502,10 +556,9 @@ class Window(QMainWindow):
             sourceId = self.sourceSelector.currentIndex()
             receiversOrientation = self.receiversSelector.currentIndex()
             ptsId = self.dataUI.modellingAnimation.currPointId
-            # print(f'Mouse at x={event.xdata}, y={event.ydata} changed')
             self.dataUI.modellingData.hodoPoints[sourceId][receiversOrientation][ptsId,:] = [event.xdata, event.ydata]
         return 0
-    
+
     def animationZoom(self, i):
         axZoom = self.zoomGraph.axes
         # Get axis variables
@@ -514,21 +567,26 @@ class Window(QMainWindow):
         timeSEG2 = np.arange(self.dataUI.beginTime[self.dataUI.sisFileId], self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
         # Change plot to go at the correct position:
         axZoom.clear()
-        idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition+150*deltaT)
+        idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]+150*deltaT)
         timeZoom = timeSEG2[idx]
         axZoom.axhline(y=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
         axZoom.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
-        axZoom.plot(timeZoom,self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx],color='k')
-        axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition-150*deltaT,right=self.dataUI.animationPicking.mousePosition+150*deltaT)
-        axZoom.autoscale(axis='y')
-        z = axZoom.get_ylim()
-        axZoom.plot([self.dataUI.animationPicking.mousePosition, self.dataUI.animationPicking.mousePosition],z,color='r')
+        vals = self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx]
+        axZoom.plot(timeZoom,vals,color='k')
+        axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition[0]-150*deltaT,right=self.dataUI.animationPicking.mousePosition[0]+150*deltaT)
+        if len(vals) < 1:
+            maxVal = 0.5
+        else:
+            maxVal = max(np.abs(vals))
+        axZoom.set_ylim(top=maxVal, bottom=-maxVal)# autoscale(axis='y')
+        # z = axZoom.get_ylim()
+        axZoom.axvline(self.dataUI.animationPicking.mousePosition[0], color='r')
         currPicking = self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect]
         if not(np.isnan(currPicking)):
             currError = self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] * currPicking
-            axZoom.plot([currPicking, currPicking], z, 'g')
-            axZoom.plot([currPicking - currError, currPicking - currError], z, ':g')
-            axZoom.plot([currPicking + currError, currPicking + currError], z, ':g')
+            axZoom.axvline(currPicking, color='g')
+            axZoom.axvline(currPicking - currError, linestyle=':', color='g')
+            axZoom.axvline(currPicking + currError, linestyle=':', color='g')
         axZoom.set_frame_on(False)
         axZoom.tick_params(
             axis='both',       # changes apply to the x-axis
@@ -548,22 +606,24 @@ class Window(QMainWindow):
         deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
         nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
         timeSEG2 = np.arange(self.dataUI.beginTime[self.dataUI.sisFileId], self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
-        if self.dataUI.animationPicking.changedSelect:
+        if not(self.dataUI.animationPicking.notPicking) or self.dataUI.animationPicking.changedSelect:
             # Change red graph + pick
             if not(self.dataUI.animationPicking.first):
                 limitsY = axMain.get_ylim()
                 limitsX = axMain.get_xlim()
             axMain.clear()
             i = 0
-            axMain.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
             for tr in self.dataUI.sisData[self.dataUI.sisFileId]:
-                data = tr.data 
-                data = data/(max(data)-min(data))+i
-                axMain.axhline(y=i, linewidth=0.5, color=[0.5, 0.5, 0.5])
+                data = tr.data
+                if not(self.dataUI.animationPicking.first):
+                    data = data/(max(data[np.logical_and(timeSEG2>limitsX[0], timeSEG2<limitsX[1])])-min(data[np.logical_and(timeSEG2>limitsX[0], timeSEG2<limitsX[1])]))+i
+                else:
+                    data = data/(max(data)-min(data))+i
                 if i == self.dataUI.animationPicking.currSelect:
                     axMain.plot(timeSEG2,data,color='r')
                 else:
                     axMain.plot(timeSEG2,data,color='k')
+                axMain.axhline(y=i, linewidth=0.5, color=[0.5, 0.5, 0.5])
                 currPicking = self.dataUI.picking[self.dataUI.sisFileId, i]
                 if not(np.isnan(currPicking)):
                     currError = self.dataUI.pickingError[self.dataUI.sisFileId, i] * currPicking
@@ -571,11 +631,21 @@ class Window(QMainWindow):
                     axMain.plot([currPicking - currError, currPicking - currError], [i-0.25, i+0.25], ':g')
                     axMain.plot([currPicking + currError, currPicking + currError], [i-0.25, i+0.25], ':g')
                 i += 1
+            axMain.xaxis.grid(True) # axMain.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
             if not(self.dataUI.animationPicking.first):
                 axMain.set_xlim(left=limitsX[0],right=limitsX[1])
                 axMain.set_ylim(bottom=limitsY[0],top=limitsY[1])
+            else: # First time plotting the graph, reset the home view
+                self.mainGraph.homeXLimits = axMain.get_xlim()
+                self.mainGraph.homeYLimits = axMain.get_ylim()
             self.dataUI.animationPicking.first=False
             self.dataUI.animationPicking.changedSelect = False
+            if not(self.dataUI.animationPicking.notPicking) and ((time.time() - self.dataUI.animationPicking.timeOnClick) > self.dataUI.animationPicking.maxClickLength):
+                x = [self.dataUI.animationPicking.mousePositionInit[0], self.dataUI.animationPicking.mousePosition[0]]
+                y = [self.dataUI.animationPicking.mousePositionInit[1], self.dataUI.animationPicking.mousePosition[1]]
+                axMain.plot(x, y, color='g', linewidth=0.5)
+            axMain.set_xlabel('Time [s]')
+            axMain. set_ylabel('Trace #')
         self.mainGraph.draw()
         return 0
     
@@ -689,6 +759,64 @@ class Window(QMainWindow):
         self.spinBoxCurrSelect.valueChanged.connect(self.traceNumberChanged)
         self.spinBoxCurrSelect.setEnabled(True)
 
+    def fftGraph(self):
+        if self.dataUI.dataLoaded:
+            if not(self.dataUI.animationPicking.fftShowed):
+                axMain = self.mainGraph.axes
+                # We stop the animation:
+                self.aniZoom.event_source.stop()
+                self.aniMain.event_source.stop()
+                self.mainGraph.mpl_disconnect(self.connectMouse)
+                self.mainGraph.mpl_disconnect(self.connectPress)
+                self.mainGraph.mpl_disconnect(self.connectRelease)
+                self.mainGraph.mpl_disconnect(self.connectKeyPress)
+                self.spinBoxCurrSelect.setEnabled(False)
+                # Changing the mainGraph to show fft instead of traces.
+                axMain.clear()
+                deltaT = float(self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
+                nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
+                freq = np.fft.fftfreq(nbPoints, deltaT)
+                for i, tr in enumerate(self.dataUI.sisData[self.dataUI.sisFileId]):
+                    data = tr.data
+                    fftData = np.abs(np.fft.fft(data))
+                    fftData = fftData/max(fftData) + i
+                    axMain.axhline(y=i, linewidth=0.5, color=[0.5, 0.5, 0.5])
+                    if i == self.dataUI.animationPicking.currSelect:
+                        axMain.plot(freq[:nbPoints//4],fftData[:nbPoints//4],color='r')
+                        axMain.fill_between(freq[:nbPoints//4], np.ones_like(freq[:nbPoints//4])*i, fftData[:nbPoints//4], color='r')
+                    else:
+                        axMain.plot(freq[:nbPoints//4],fftData[:nbPoints//4],color='k')
+                        axMain.fill_between(freq[:nbPoints//4], np.ones_like(freq[:nbPoints//4])*i, fftData[:nbPoints//4], color='k')
+                axMain.xaxis.grid(True)
+                axMain.set_xlabel('Frequency [Hz]')
+                axMain. set_ylabel('Trace #')
+                self.mainGraph.draw()
+                self.dataUI.animationPicking.fftShowed = True
+                # Change the menu item to get the original graph back
+                fftAction = self.dataUI.animationPicking.fftAnim
+                fftAction.setStatusTip('Return to the original time-series graphs')
+                fftAction.setText('Show the time-series dataset')
+                self.mainGraph.homeXLimits = axMain.get_xlim()
+                self.mainGraph.homeYLimits = axMain.get_ylim()
+            else:
+                # We begin back the animation:
+                self.aniZoom.event_source.start()
+                self.aniMain.event_source.start()
+                self.connectMouse = self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
+                self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
+                self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+                self.connectKeyPress = self.mainGraph.mpl_connect('key_press_event', self.onKeyPress)
+                self.spinBoxCurrSelect.setEnabled(True)
+                self.dataUI.animationPicking.first = True
+                self.dataUI.animationPicking.changedSelect = True
+                self.dataUI.animationPicking.fftShowed = False
+                # Change the menu item to get the original graph back
+                fftAction = self.dataUI.animationPicking.fftAnim
+                fftAction.setStatusTip('Show the FFT transform of the different traces')
+                fftAction.setText('Show FFT of dataset')
+        
+
+
     def dcFilter(self):
         for st in self.dataUI.sisData:
             for tr in st:
@@ -766,6 +894,7 @@ class Window(QMainWindow):
         self.connectMouse = self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
         self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
         self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+        self.connectKeyPress = self.mainGraph.mpl_connect('key_press_event', self.onKeyPress)
         self.aniMain = animation.FuncAnimation(self.mainGraph.fig, self.animationMain, interval=16.7)
         self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7)
         self.mainGraph.draw()
@@ -773,7 +902,11 @@ class Window(QMainWindow):
 
     def comboBoxChange(self, newId):
         self.dataUI.sisFileId = newId
-        self.dataUI.animationPicking.changedSelect = True
+        if self.dataUI.animationPicking.fftShowed:
+            self.dataUI.animationPicking.fftShowed = False
+            self.fftGraph()
+        else:
+            self.dataUI.animationPicking.changedSelect = True
 
     def _savePicking(self):
         self.statusBar.showMessage('Save current picking . . .')
@@ -1265,7 +1398,7 @@ class Window(QMainWindow):
         ## Main graph with all the traces
         self.mainGraph = MplCanvas(importTab, width=8, height=7, dpi=100)
         self.mainGraph.axes.plot([0,1,2,3,4], [10,1,20,3,40], animated=True)
-        self.mainGraphToolbar = NavigationToolbar2QT(self.mainGraph, importTab)
+        self.mainGraphToolbar = CustomHomeToolbar(self.mainGraph, importTab)
         mainGraphLayout = QVBoxLayout()
         mainGraphLayout.addWidget(self.mainGraphToolbar)
         mainGraphLayout.addWidget(self.mainGraph)
@@ -1313,6 +1446,7 @@ class Window(QMainWindow):
                 self.mainGraph.mpl_disconnect(self.connectMouse)
                 self.mainGraph.mpl_disconnect(self.connectPress)
                 self.mainGraph.mpl_disconnect(self.connectRelease)
+                self.mainGraph.mpl_disconnect(self.connectKeyPress)
                 self.spinBoxCurrSelect.setEnabled(False)
             else:
                 # We begin back the animation:
@@ -1321,6 +1455,7 @@ class Window(QMainWindow):
                 self.connectMouse = self.mainGraph.mpl_connect('motion_notify_event', self.changeMouse)
                 self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
                 self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
+                self.connectKeyPress = self.mainGraph.mpl_connect('key_press_event', self.onKeyPress)
                 self.spinBoxCurrSelect.setEnabled(True)
 
     def resetPicking(self):
