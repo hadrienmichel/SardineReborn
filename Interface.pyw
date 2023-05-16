@@ -12,6 +12,7 @@ import sys
 import os
 import re
 from copy import deepcopy
+import typing
 import numpy as np
 import time
 import matplotlib
@@ -42,11 +43,14 @@ from PyQt5.QtWidgets import (
     QWidget,
     QTabWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QGridLayout,
     QAction,
     QMainWindow,
     QStatusBar,
     QMessageBox,
+    QSlider,
+    QDialog,
     QFileDialog,
     QInputDialog,
     QProgressBar,
@@ -57,7 +61,7 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QLineEdit)
 from PyQt5.QtCore import Qt
-from PyQt5 import QtGui
+from PyQt5 import QtCore, QtGui
 
 defaultStatus = "Idle."
 
@@ -302,6 +306,85 @@ class picklingStatus():
         self.picking = []
         self.pickingError = []
         self.sisFileId = 0
+
+class PickT0(QDialog):
+    '''
+    This window intends to propose multiple options for the t0 picking.
+        - Manual picking from the trace at the source
+        - Setting an offset value
+        - Using the picks that have been realise to interpolate the t0 at the source
+    '''
+    def __init__(self, parent):
+        super().__init__()
+        self.setWindowTitle('Picking t0 helper')
+        self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
+        self.resize(500, 300)
+        self.mainWindow = parent # In order to be able to plot elements and retreive values
+
+        # Creating the graph widget:
+        self.traceGraph = MplCanvas(self, width=6, hight=2)
+
+        # Create the slider for graph:
+        self.slider = QSlider(Qt.Horizontal, self)
+        self.slider.setRange(0,300)
+        self.slider.setValue(0)
+        self.slider.valueChanged.connect(self.updateAxis)
+
+        # Creating the widget with the current value (can be changed by the user):
+        self.textLabel1 = QLabel('Value of time offset : ')
+        self.currValue = QLineEdit(str(0), self)
+        self.currValue.textChanged.connect(self.updateAxis)
+        valueLayout = QHBoxLayout()
+        valueLayout.addWidget(self.textLabel1)
+        valueLayout.addWidget(self.currValue)
+        
+        # Creating the automated picking option:
+        self.automatedPick = QPushButton('Automated', self)
+        self.textLabel2 = QLabel('Number of Traces : ', self)
+        self.nbTraces = QLineEdit(str(3), self)
+        automatedLayout = QHBoxLayout()
+        automatedLayout.addWidget(self.automatedPick)
+        automatedLayout.addWidget(self.textLabel2)
+        automatedLayout.addWidget(self.nbTraces)
+
+        # Creating final layout:
+        layout = QVBoxLayout()
+        layout.addWidget(self.traceGraph)
+        layout.addWidget(self.slider)
+        layout.addLayout(valueLayout)
+        layout.addLayout(automatedLayout)
+
+        self.setLayout(layout)
+
+        ## Changing the graph values:
+        axTrace = self.traceGraph.axes
+        sensors = self.mainWindow.dataUI.geometry.sensors
+        sourcesId = self.mainWindow.dataUI.geometry.sourcesId
+        receivers = self.mainWindow.dataUI.geometry.receivers
+        currFile = self.mainWindow.dataUI.sisFileId
+        deltaT = float(self.mainWindow.dataUI.sisData[self.mainWindow.dataUI.sisFileId][0].stats.delta)
+        nbPoints = self.mainWindow.dataUI.sisData[self.mainWindow.dataUI.sisFileId][0].stats.npts
+        timeSEG2 = np.arange(self.mainWindow.dataUI.beginTime[self.mainWindow.dataUI.sisFileId], self.mainWindow.dataUI.beginTime[self.mainWindow.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
+        sId = int(sourcesId[currFile])
+        found = False
+        for i in range(len(self.mainWindow.dataUI.sisData[currFile])):
+            rId = int(sensors.index(receivers[i]))
+            if sId == rId:
+                found = True
+                break
+        if found:
+            # The source is located at the same position as a single trace
+            axTrace.plot(timeSEG2[:300], self.mainWindow.dataUI.sisData[currFile][i][:300])
+            currPicking = self.mainWindow.dataUI.picking[self.mainWindow.dataUI.sisFileId, i]
+            if not(np.isnan(currPicking)):
+                axTrace.axvline(currPicking, color='g')
+                self.slider.setValue(int(currPicking/deltaT))
+                self.currValue.setText(str(currPicking))
+        self.traceGraph.draw()
+
+    def updateAxis(self, event):
+        pass
+
 class Window(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1713,7 +1796,7 @@ class Window(QMainWindow):
                 self.dataUI.animationPicking.changedSelect = True
                 self.updateTab0()
             else:
-                self.statusBar.showMessage('Empty strate loaded')
+                self.statusBar.showMessage('Empty state loaded')
         else:
             self.statusBar.showMessage('No status loaded!')
 
