@@ -320,20 +320,20 @@ class PickT0(QDialog):
         self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
         self.resize(500, 300)
         self.mainWindow = parent # In order to be able to plot elements and retreive values
-
+        self.nbValuesDisp = 300
         # Creating the graph widget:
-        self.traceGraph = MplCanvas(self, width=6, hight=2)
+        self.traceGraph = MplCanvas(self, width=6, height=2)
 
         # Create the slider for graph:
         self.slider = QSlider(Qt.Horizontal, self)
-        self.slider.setRange(0,300)
+        self.slider.setRange(0,self.nbValuesDisp)
         self.slider.setValue(0)
-        self.slider.valueChanged.connect(self.updateAxis)
+        self.slider.valueChanged.connect(self.updateAxisSlider)
 
         # Creating the widget with the current value (can be changed by the user):
         self.textLabel1 = QLabel('Value of time offset : ')
         self.currValue = QLineEdit(str(0), self)
-        self.currValue.textChanged.connect(self.updateAxis)
+        self.currValue.textChanged.connect(self.updateAxisText)
         valueLayout = QHBoxLayout()
         valueLayout.addWidget(self.textLabel1)
         valueLayout.addWidget(self.currValue)
@@ -357,6 +357,7 @@ class PickT0(QDialog):
         self.setLayout(layout)
 
         ## Changing the graph values:
+        self.signal = None
         axTrace = self.traceGraph.axes
         sensors = self.mainWindow.dataUI.geometry.sensors
         sourcesId = self.mainWindow.dataUI.geometry.sourcesId
@@ -371,19 +372,49 @@ class PickT0(QDialog):
             rId = int(sensors.index(receivers[i]))
             if sId == rId:
                 found = True
+                self.deltaT = deltaT
+                self.signal = self.mainWindow.dataUI.sisData[currFile][i]
+                self.timeSEG2 = timeSEG2
                 break
         if found:
             # The source is located at the same position as a single trace
-            axTrace.plot(timeSEG2[:300], self.mainWindow.dataUI.sisData[currFile][i][:300])
+            axTrace.plot(timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
             currPicking = self.mainWindow.dataUI.picking[self.mainWindow.dataUI.sisFileId, i]
             if not(np.isnan(currPicking)):
                 axTrace.axvline(currPicking, color='g')
                 self.slider.setValue(int(currPicking/deltaT))
                 self.currValue.setText(str(currPicking))
+            else:
+                axTrace.axvline(0, color='g')
+                sliderVal = -self.timeSEG2[0]
+                self.slider.setValue(int(sliderVal/self.deltaT))
         self.traceGraph.draw()
+        
 
-    def updateAxis(self, event):
-        pass
+    def updateAxisSlider(self):
+        currSlider = self.slider.value()
+        currPick = self.timeSEG2[0] + currSlider*self.deltaT
+        self.currValue.setText(str(currPick))
+        if self.signal is not None:
+            axTrace = self.traceGraph.axes 
+            # The source is located at the same position as a single trace
+            axTrace.clear()
+            axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
+            axTrace.axvline(currPick, color='g')
+            self.traceGraph.draw()
+
+
+    def updateAxisText(self):
+        currPick = float(self.currValue.text())
+        sliderVal = currPick - self.timeSEG2[0]
+        self.slider.setValue(int(sliderVal/self.deltaT))
+        if self.signal is not None:
+            axTrace = self.traceGraph.axes 
+            # The source is located at the same position as a single trace
+            axTrace.clear()
+            axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
+            axTrace.axvline(currPick, color='g')
+            self.traceGraph.draw()
 
 class Window(QMainWindow):
     def __init__(self) -> None:
@@ -1506,6 +1537,7 @@ class Window(QMainWindow):
         self.spinBoxCurrSelect = QSpinBox(importTab)
         self.spinBoxCurrSelect.setEnabled(False)
         self.buttonTabPickingSetT0 = QPushButton('Set t=0')
+        self.buttonTabPickingSetT0.clicked.connect(self.setT0)
         textBox = QLabel(importTab)
         textBox.setText('Select the trace number:')
         layout.addWidget(textBox,6,10,1,5)
@@ -1519,6 +1551,14 @@ class Window(QMainWindow):
         self.buttonTabPickingSetT0.setCheckable(True)
         importTab.setLayout(layout)
         return importTab
+
+    def setT0(self):
+        if self.dataUI.dataLoaded:
+            newWindow = PickT0(self)
+            newWindow.show()
+            if newWindow.exec_():
+                # use returned values
+                pass
     
     def setPicking(self):
         if self.dataUI.dataLoaded:
