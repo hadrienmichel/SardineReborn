@@ -9,3 +9,4 @@ dependencies:
   - obspy=1.3.0
   - pygimli=1.1.1
   - pyqt=5.12.3
+  - scipy=1.6.1
