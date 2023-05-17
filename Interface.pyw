@@ -16,6 +16,7 @@ import typing
 import numpy as np
 import time
 import matplotlib
+from scipy import stats
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'),
@@ -172,6 +173,12 @@ def modelWithSlope(interS, vS):
         v = [v0, v1, v2]
     return v, hL, hR
 
+def calculateDistance(pts, pt):
+    pts = np.asarray(pts)
+    xDiff = pts[:,0] - pt[0]
+    yDiff = pts[:,1] = pt[1]
+    dist = np.sqrt(xDiff**2 + yDiff**2)
+    return dist
 
 ## Need to take a closer look at this: https://programmerall.com/article/10751929193/
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
@@ -310,30 +317,55 @@ class picklingStatus():
 class PickT0(QDialog):
     '''
     This window intends to propose multiple options for the t0 picking.
-        - Manual picking from the trace at the source
-        - Setting an offset value
+        - Manual picking from the trace at the source (DONE)
+        - Setting an offset value (DONE)
         - Using the picks that have been realise to interpolate the t0 at the source
     '''
     def __init__(self, parent):
         super().__init__()
         self.setWindowTitle('Picking t0 helper')
         self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
-        self.resize(500, 300)
+        self.resize(600, 300)
         self.mainWindow = parent # In order to be able to plot elements and retreive values
         self.nbValuesDisp = 300
+        # Create the file selector:
+        ## Comb Box for choosing the correct file to pick.
+        self.comboBoxFilesPicking = QComboBox()
+        self.sisFileId = self.mainWindow.dataUI.sisFileId
+        for i, name in enumerate(self.mainWindow.dataUI.paths.seg2Files):
+            self.comboBoxFilesPicking.addItem(name)
+            if i == self.sisFileId:
+                textItem = name
+        self.comboBoxFilesPicking.setCurrentText(textItem)
+        self.comboBoxFilesPicking.currentIndexChanged.connect(self.comboBoxChange)
+        self.newT0 = np.zeros_like(self.mainWindow.dataUI.paths.seg2Files, dtype=np.float)
+
         # Creating the graph widget:
         self.traceGraph = MplCanvas(self, width=6, height=2)
 
         # Create the slider for graph:
+        textZoom = QLabel('Zoom : ')
+        self.sliderZoom = QSlider(Qt.Horizontal, self)
+        self.sliderZoom.setRange(1, 1000)
+        self.sliderZoom.setValue(100)
+        self.sliderZoom.valueChanged.connect(self.updateZoom)
+        zoomLayout = QHBoxLayout()
+        zoomLayout.addWidget(textZoom)
+        zoomLayout.addWidget(self.sliderZoom)
+
+        textPick = QLabel('T0 offset : ')
         self.slider = QSlider(Qt.Horizontal, self)
         self.slider.setRange(0,self.nbValuesDisp)
         self.slider.setValue(0)
+        self.slider.sliderReleased.connect(self.updateSlider)
         self.slider.valueChanged.connect(self.updateAxisSlider)
-
+        sliderLayout = QHBoxLayout()
+        sliderLayout.addWidget(textPick)
+        sliderLayout.addWidget(self.slider)
         # Creating the widget with the current value (can be changed by the user):
         self.textLabel1 = QLabel('Value of time offset : ')
         self.currValue = QLineEdit(str(0), self)
-        self.currValue.textChanged.connect(self.updateAxisText)
+        self.currValue.textEdited.connect(self.updateText)
         valueLayout = QHBoxLayout()
         valueLayout.addWidget(self.textLabel1)
         valueLayout.addWidget(self.currValue)
@@ -346,26 +378,67 @@ class PickT0(QDialog):
         automatedLayout.addWidget(self.automatedPick)
         automatedLayout.addWidget(self.textLabel2)
         automatedLayout.addWidget(self.nbTraces)
+        self.automatedPick.clicked.connect(self.automatedPicking)
 
         # Creating final layout:
         layout = QVBoxLayout()
+        layout.addWidget(self.comboBoxFilesPicking)
         layout.addWidget(self.traceGraph)
-        layout.addWidget(self.slider)
+        layout.addLayout(zoomLayout)
+        layout.addLayout(sliderLayout)
         layout.addLayout(valueLayout)
         layout.addLayout(automatedLayout)
 
         self.setLayout(layout)
+        self.graphUpdate()
 
-        ## Changing the graph values:
-        self.signal = None
-        axTrace = self.traceGraph.axes
+    def automatedPicking(self):
+        '''
+        This picking of the 0-time offset is done using the already picked traces in the dataset.
+        It uses the closest n traces in any given directions to infer an hodochronique and 
+        thus a 0-time offset.
+
+        It is the only approach that might work for offset shots.
+        '''
         sensors = self.mainWindow.dataUI.geometry.sensors
         sourcesId = self.mainWindow.dataUI.geometry.sourcesId
         receivers = self.mainWindow.dataUI.geometry.receivers
-        currFile = self.mainWindow.dataUI.sisFileId
-        deltaT = float(self.mainWindow.dataUI.sisData[self.mainWindow.dataUI.sisFileId][0].stats.delta)
-        nbPoints = self.mainWindow.dataUI.sisData[self.mainWindow.dataUI.sisFileId][0].stats.npts
-        timeSEG2 = np.arange(self.mainWindow.dataUI.beginTime[self.mainWindow.dataUI.sisFileId], self.mainWindow.dataUI.beginTime[self.mainWindow.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
+        currFile = self.sisFileId
+        deltaT = float(self.mainWindow.dataUI.sisData[currFile][0].stats.delta)
+        nbPoints = self.mainWindow.dataUI.sisData[currFile][0].stats.npts
+        sId = int(sourcesId[currFile])
+        distReceivers = calculateDistance(receivers, sensors[sId])
+        k = int(self.nbTraces.text())
+        pickedTimes = self.mainWindow.dataUI.picking[currFile, :]
+        if min(distReceivers) == 0:
+            idMin = np.argmin(distReceivers)
+            distReceivers = np.delete(distReceivers, idMin)
+            pickedTimes = np.delete(pickedTimes, idMin)
+        idx = np.argpartition(distReceivers, k)[:k]
+        # Retreive the picked times for the given files:
+        pickedTime = pickedTimes[idx]
+        if np.isnan(pickedTime).any():
+            QMessageBox.warning(self, 'Warning !', 'Not all closests traces are already picked.\nUnable to infer the offset')
+        else:
+            _, timeAt0, _, _, _ = stats.linregress(distReceivers[idx], pickedTime)
+            self.currValue.setText(str(timeAt0))
+            self.newT0[self.sisFileId] = timeAt0
+            if self.signal is not None:
+                sliderPos = int((timeAt0-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+                self.slider.setValue(sliderPos)
+
+    def graphUpdate(self):
+        ## Changing the graph values:
+        self.signal = None
+        axTrace = self.traceGraph.axes
+        axTrace.clear()
+        sensors = self.mainWindow.dataUI.geometry.sensors
+        sourcesId = self.mainWindow.dataUI.geometry.sourcesId
+        receivers = self.mainWindow.dataUI.geometry.receivers
+        currFile = self.sisFileId
+        deltaT = float(self.mainWindow.dataUI.sisData[currFile][0].stats.delta)
+        nbPoints = self.mainWindow.dataUI.sisData[currFile][0].stats.npts
+        timeSEG2 = np.arange(self.mainWindow.dataUI.beginTime[currFile], self.mainWindow.dataUI.beginTime[currFile]+nbPoints*deltaT, deltaT)
         sId = int(sourcesId[currFile])
         found = False
         for i in range(len(self.mainWindow.dataUI.sisData[currFile])):
@@ -378,43 +451,71 @@ class PickT0(QDialog):
                 break
         if found:
             # The source is located at the same position as a single trace
-            axTrace.plot(timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
-            currPicking = self.mainWindow.dataUI.picking[self.mainWindow.dataUI.sisFileId, i]
-            if not(np.isnan(currPicking)):
-                axTrace.axvline(currPicking, color='g')
-                self.slider.setValue(int(currPicking/deltaT))
-                self.currValue.setText(str(currPicking))
+            axTrace.plot(timeSEG2, self.signal)
+            if self.newT0[self.sisFileId] == 0:
+                currPicking = self.mainWindow.dataUI.picking[currFile, i]
+                if not(np.isnan(currPicking)):
+                    axTrace.axvline(currPicking, color='g')
+                    self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                    self.currValue.setText(str(currPicking))
+                else:
+                    axTrace.axvline(0, color='g')
+                    currPicking = 0
+                    self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
             else:
-                axTrace.axvline(0, color='g')
-                sliderVal = -self.timeSEG2[0]
-                self.slider.setValue(int(sliderVal/self.deltaT))
+                currPicking = self.newT0[self.sisFileId]
+                axTrace.axvline(currPicking, color='g')
+                self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                self.currValue.setText(str(currPicking))
+        axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
         self.traceGraph.draw()
-        
 
-    def updateAxisSlider(self):
-        currSlider = self.slider.value()
-        currPick = self.timeSEG2[0] + currSlider*self.deltaT
-        self.currValue.setText(str(currPick))
-        if self.signal is not None:
-            axTrace = self.traceGraph.axes 
-            # The source is located at the same position as a single trace
-            axTrace.clear()
-            axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
-            axTrace.axvline(currPick, color='g')
-            self.traceGraph.draw()
-
-
-    def updateAxisText(self):
+    def updateZoom(self):
+        axTrace = self.traceGraph.axes
+        axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+        self.traceGraph.draw()
+        # Recompute value slider position:
         currPick = float(self.currValue.text())
-        sliderVal = currPick - self.timeSEG2[0]
-        self.slider.setValue(int(sliderVal/self.deltaT))
+        sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+        self.slider.setValue(sliderPos)
+
+    def comboBoxChange(self, newId):
+        self.sisFileId = newId
+        self.graphUpdate()
+
+    def updateSlider(self):
+        currSlider = self.slider.value()
+        currPick = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
+        self.currValue.setText(str(currPick))
+        self.newT0[self.sisFileId] = float(currPick)
+        
+    def updateAxisSlider(self):
         if self.signal is not None:
             axTrace = self.traceGraph.axes 
             # The source is located at the same position as a single trace
             axTrace.clear()
-            axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
+            currSlider = self.slider.value()
+            currPick = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
+            axTrace.plot(self.timeSEG2, self.signal)
             axTrace.axvline(currPick, color='g')
+            axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
             self.traceGraph.draw()
+
+    def updateText(self):
+        currPick = float(self.currValue.text())
+        sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+        self.slider.setValue(sliderPos)        
+        # if self.signal is not None:
+        #     axTrace = self.traceGraph.axes 
+        #     # The source is located at the same position as a single trace
+        #     axTrace.clear()
+        #     axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
+        #     axTrace.axvline(currPick, color='g')
+        #     self.traceGraph.draw()
+        self.newT0[self.sisFileId] = float(currPick)
+
+    def getNewT0(self):
+        return self.newT0
 
 class Window(QMainWindow):
     def __init__(self) -> None:
@@ -1548,7 +1649,7 @@ class Window(QMainWindow):
         self.buttonTabPickingSet.setCheckable(True)
         self.buttonTabPickingSet.clicked.connect(self.setPicking)
         self.buttonTabPickingReset.clicked.connect(self.resetPicking)
-        self.buttonTabPickingSetT0.setCheckable(True)
+        # self.buttonTabPickingSetT0.setCheckable(True)
         importTab.setLayout(layout)
         return importTab
 
@@ -1556,9 +1657,13 @@ class Window(QMainWindow):
         if self.dataUI.dataLoaded:
             newWindow = PickT0(self)
             newWindow.show()
-            if newWindow.exec_():
-                # use returned values
-                pass
+            newWindow.exec()
+            newT0 = newWindow.getNewT0()
+            newWindow.close()
+            for i, t0Update in enumerate(newT0):
+                self.dataUI.beginTime[i] -= t0Update
+                self.dataUI.picking[i,:] -= t0Update
+            self.dataUI.animationPicking.changedSelect = True
     
     def setPicking(self):
         if self.dataUI.dataLoaded:
