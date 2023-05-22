@@ -65,6 +65,7 @@ from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui
 
 defaultStatus = "Idle."
+defaultError = 0.01 # By default, the error on the picking is going to be 1%
 
 def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
     '''BUILDMODEL is a function that computes a simple optimal model for 
@@ -708,7 +709,7 @@ class Window(QMainWindow):
                         QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
                     else:
                         self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition[0]
-                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = max(self.dataUI.animationPicking.mousePosition[0]*0.03, 0.000001) # Default error is 3%
+                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = defaultError # max(self.dataUI.animationPicking.mousePosition[0]*defaultError, 0.000001) # Default error is 3%
                 self.dataUI.animationPicking.changedSelect = True
             else:
                 yPicks = [self.dataUI.animationPicking.mousePositionInit[1], self.dataUI.animationPicking.mousePosition[1]]
@@ -724,7 +725,7 @@ class Window(QMainWindow):
                         timePick = m*(currPick-yPicks[idMin]) + xPicks[idMin]
                         if timePick > 0:
                             self.dataUI.picking[self.dataUI.sisFileId, currPick] = timePick
-                            self.dataUI.pickingError[self.dataUI.sisFileId, currPick] = max(timePick*0.03, 0.000001) # Default error is 3%
+                            self.dataUI.pickingError[self.dataUI.sisFileId, currPick] = defaultError # max(timePick*defaultError, 0.000001) # Default error is 3%
                 self.dataUI.animationPicking.changedSelect = True
             if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
                 if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
@@ -1091,7 +1092,7 @@ class Window(QMainWindow):
                 aic_f = aic_simple(tr.data)
                 p_idx = aic_f.argmin()
                 self.dataUI.picking[i, j] = p_idx/tr.stats.sampling_rate
-                self.dataUI.pickingError[i, j] = max(self.dataUI.picking[i, j] * 0.05, 0.000001)
+                self.dataUI.pickingError[i, j] = 0.05 # max(self.dataUI.picking[i, j] * 0.05, 0.000001)
                 pBar.setValue((i*len(self.dataUI.sisData[0]) + (j)))
         pBar.close()
         self.dataUI.animationPicking.changedSelect = True
@@ -1136,7 +1137,7 @@ class Window(QMainWindow):
                 rId = int(sensors.index(receivers[i]))
                 if sId != rId: # The traveltime for source = receiever is 0 and not usefull for inversion!
                     t = self.dataUI.picking[nbFile, i]
-                    err = max([self.dataUI.pickingError[nbFile, i] * t, 0.000001])# Avoid the error with null error in inversion
+                    err = self.dataUI.pickingError[nbFile, i] # max([self.dataUI.pickingError[nbFile, i] * t, 0.000001])# Avoid the error with null error in inversion
                     if not(np.isnan(t)):
                         picksSave.append([sId, rId, t, err])
         # Remove unused sensors from the list:
@@ -1246,9 +1247,9 @@ class Window(QMainWindow):
                     rId = np.where(np.all(receivers == rCurr, axis=1))[0]
                     self.dataUI.picking[sId, rId] = pickCurr
                     if len(measurements[i,:]) > 3:
-                        self.dataUI.pickingError[sId, rId] = errCurr/pickCurr
+                        self.dataUI.pickingError[sId, rId] = errCurr #/pickCurr # Attention, breaks backward compatibility!!!
                     else:
-                        self.dataUI.pickingError[sId, rId] = 0.03
+                        self.dataUI.pickingError[sId, rId] = defaultError
                 self.statusBar.showMessage(f'Data loaded with picking on graphs')
                 self.dataUI.animationPicking.changedSelect = True
             self.filePicksPath.setText(fName)
@@ -1511,7 +1512,7 @@ class Window(QMainWindow):
             ri = sensors[measurements[index, 1].astype(int) - 1, 0]
             if hasError:
                 erri = measurements[index, 3]
-                ax.errorbar(ri, ti, yerr=erri, linestyle='none', color=colors[i % 10], marker='s', markersize=5)
+                ax.errorbar(ri, ti, yerr=np.multiply(erri,ti), linestyle='none', color=colors[i % 10], marker='s', markersize=5)
             else:
                 ax.plot(ri, ti, linestyle='none', color=colors[i % 10], marker='s', markersize=5)
         ax.set_xlabel('X (m)')
