@@ -685,9 +685,9 @@ class Window(QMainWindow):
         if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
             # Checking if the zoom or pan tools are checked to enable line-picking
-            toolbarState = self.mainGraph.fig.canvas.toolbar.mode
-            toolbarOptions = type(toolbarState)
-            if toolbarState == toolbarOptions.ZOOM or toolbarState == toolbarOptions.PAN:
+            toolbarState = str(self.mainGraph.fig.canvas.toolbar.mode)
+            # toolbarOptions = type(toolbarState)
+            if toolbarState != '':#toolbarOptions.ZOOM or toolbarState == toolbarOptions.PAN:
                 self.dataUI.animationPicking.notPicking = True
             else:
                 self.dataUI.animationPicking.notPicking = False
