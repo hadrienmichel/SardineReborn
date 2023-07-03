@@ -1393,7 +1393,7 @@ class Window(QMainWindow):
     def _updateHodoGraph(self):
         axHod = self.hodochronesGraph.axes
         axHod.cla()
-        self.plotHodochrones(self.dataUI.modellingData.sensors, self.dataUI.modellingData.measurements)
+        maxY = self.plotHodochrones(self.dataUI.modellingData.sensors, self.dataUI.modellingData.measurements)
         colors = matplotlib.pyplot.cm.tab10(np.arange(10))
         xAxisShow = np.linspace(np.min(self.dataUI.modellingData.sensors[:,0]), np.max(self.dataUI.modellingData.sensors[:,0]),1000)
         for i, sourceX in enumerate(self.dataUI.modellingData.sourcesX):
@@ -1402,10 +1402,12 @@ class Window(QMainWindow):
                 inter = self.dataUI.modellingData.interceptTime[i][j]
                 points = self.dataUI.modellingData.hodoPoints[i][j]
                 xShow = xAxisShow[(xAxisShow - sourceX)*orientation >= 0]
+                maxY = max([maxY, max(points[:,1])])
                 for k in range(self.dataUI.modellingData.nbLayers):
                     times = inter[k] + (1/vel[k])*np.abs(xShow-sourceX)
                     axHod.plot(xShow, times, color=colors[i %10])
                 axHod.plot(points[:,0], points[:,1], linestyle='none', marker='o', color='k', markersize=5)
+        axHod.set_ylim(bottom=0.0, top=maxY*1.1)        
         self.hodochronesGraph.draw()
 
     def _updateModelGraph(self):    
@@ -1454,7 +1456,7 @@ class Window(QMainWindow):
         axMod.set_ylabel('Depth [m]')
         xRange = axMod.get_xlim()
         xRange = xRange[1] - xRange[0]
-        axMod.set_ylim((-1, np.ceil(xRange/10)))
+        axMod.set_ylim((-1, np.ceil(xRange/5)))
         axMod.invert_yaxis()
         self.modelGraph.draw()
 
@@ -1508,12 +1510,14 @@ class Window(QMainWindow):
     
     def plotHodochrones(self, sensors, measurements):
         ax=self.hodochronesGraph.axes
+        maxY = 0
         sources = np.unique(measurements[:,0]).astype(int)
         colors = matplotlib.pyplot.cm.tab10(np.arange(10))
         hasError = len(measurements[0,:])==4
         for i, sId in enumerate(sources):
             index = measurements[:,0].astype(int) == sId
             ti = measurements[index, 2]
+            maxY = max([maxY, max(ti)])
             ri = sensors[measurements[index, 1].astype(int) - 1, 0]
             if hasError:
                 erri = measurements[index, 3]
@@ -1526,6 +1530,7 @@ class Window(QMainWindow):
         ax.grid(True)
         self.hodochronesGraph.fig.tight_layout()
         self.hodochronesGraph.draw()
+        return maxY
 
     # def _saveModel(self):
     #     # TODO
