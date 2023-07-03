@@ -5,7 +5,7 @@
 # Add option to visualize the FFT of the datasets (DONE on 16-05-2023)
 # Add option to pick along a line (DONE on 15-05-2023)
 # Add option to change the header (dt for example)
-# Add options for setting t0 : by value, by graphical picking, by line picking (automated?)
+# Add options for setting t0 : by value, by graphical picking, by line picking (automated?) (DONE on 22-05-2023)
 
 ## Imports for the inner functions
 import sys
@@ -405,8 +405,6 @@ class PickT0(QDialog):
         sourcesId = self.mainWindow.dataUI.geometry.sourcesId
         receivers = self.mainWindow.dataUI.geometry.receivers
         currFile = self.sisFileId
-        deltaT = float(self.mainWindow.dataUI.sisData[currFile][0].stats.delta)
-        nbPoints = self.mainWindow.dataUI.sisData[currFile][0].stats.npts
         sId = int(sourcesId[currFile])
         distReceivers = calculateDistance(receivers, sensors[sId])
         k = int(self.nbTraces.text())
@@ -650,7 +648,9 @@ class Window(QMainWindow):
 
         ## Defining the status bar:
         self.statusBar = QStatusBar(self)
-        self.statusBar.showMessage(defaultStatus)
+        permanentMessage = QLabel(self.statusBar)
+        permanentMessage.setText('Sardine Reborn - Hadrien Michel (2023)')
+        self.statusBar.addPermanentWidget(permanentMessage)
         self.setStatusBar(self.statusBar)
         self.dataUI.animationPicking.fftAnim = fftGraph # Adding easy access to fftGraph action for changes in name and tip
 
@@ -919,21 +919,21 @@ class Window(QMainWindow):
 
                     ## Updating status bar
                     self.dataUI.dataLoaded = True
-                    self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
+                    self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.', 10000)
                 else:
-                    self.statusBar.showMessage(f'No data loaded')
+                    self.statusBar.showMessage(f'No data loaded', 2000)
             else:
                 self.saveDataUI(path, file, SEG2Files, ReceiversPosition, sensors, sourcesId)
 
                 ## Updating status bar
                 self.dataUI.dataLoaded = True
-                self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.')
+                self.statusBar.showMessage(f'{len(SEG2Files)} data files retreived from the geometry file with {len(sensors)} sensors.', 10000)
             
             ## Return to the picking tab
             self.updateTab0()
             self.tabs.setCurrentIndex(0)
         else:
-            self.statusBar.showMessage('No file loaded!')
+            self.statusBar.showMessage('No file loaded!', 2000)
 
     def saveDataUI(self, path, file, SEG2Files, ReceiversPosition, sensors, sourcesId):
         ## Setting up the paths:
@@ -1167,11 +1167,11 @@ class Window(QMainWindow):
             for i in range(nbMeas):
                 f.write('%d\t%d\t%f\t%f\n' % (picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]))
             f.close()
-            self.statusBar.showMessage(defaultStatus)
+            self.statusBar.showMessage(f'Picking saved at: {fname}.', 10000)
             self.filePicksPath.setText(fname)
             self._initPygimli(fname)
         else:
-            self.statusBar.showMessage('No file saved!')
+            self.statusBar.showMessage('No file saved!', 2000)
 
 
     def _loadPicking(self):
@@ -1228,7 +1228,7 @@ class Window(QMainWindow):
                         else:
                             ## Do nothing for the picking window:
                             loadPicking = False
-                            self.statusBar.showMessage(f'Data loaded but picking not presented')
+                            self.statusBar.showMessage(f'Data loaded but picking not presented', 2000)
                     else:
                         loadPicking = True
             if loadPicking:
@@ -1237,6 +1237,11 @@ class Window(QMainWindow):
                 receivers = np.asarray(self.dataUI.geometry.receivers)
                 self.dataUI.pickingError[:] = np.nan
                 self.dataUI.picking[:] = np.nan
+                if len(measurements[0,:]) > 3:
+                    if np.mean(measurements[:,3]) < 0.001:
+                        reply = QMessageBox.question(self, 'Error scaling issue . . .', 'The *.sgt file you are trying to load has very low mean errors.\nIt is probably an old file with an error in the encoding (<v0.4.0).\nWould you like to overwrite the error with a constant 3%% error ?', QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+                        if reply == QMessageBox.Yes:
+                            measurements[:,3] = 0.03
                 for i in range(nbMeasurements):
                     sCurr = sensors[int(measurements[i,0])-1,:]
                     rCurr = sensors[int(measurements[i,1])-1,:]
@@ -1250,7 +1255,7 @@ class Window(QMainWindow):
                         self.dataUI.pickingError[sId, rId] = errCurr #/pickCurr # Attention, breaks backward compatibility!!!
                     else:
                         self.dataUI.pickingError[sId, rId] = defaultError
-                self.statusBar.showMessage(f'Data loaded with picking on graphs')
+                self.statusBar.showMessage(f'Data loaded with picking on graphs', 10000)
                 self.dataUI.animationPicking.changedSelect = True
             self.filePicksPath.setText(fName)
             self._initPygimli(fName)
@@ -1383,7 +1388,7 @@ class Window(QMainWindow):
             self.receiversSelector.addItems(self.dataUI.modellingAnimation.namesOrientations[0])
             self.sourceSelector.currentIndexChanged.connect(self.sourceSelectorChanged)
         except:
-            QMessageBox.warning(self, 'Warning !', 'Impossible to model using the intercept time method!\nThe robustness of this method needs to be imporved.')
+            QMessageBox.warning(self, 'Warning !', 'Impossible to model using the intercept time method!\nThe robustness of this method needs to be improved.')
     
     def _updateHodoGraph(self):
         axHod = self.hodochronesGraph.axes
@@ -1537,9 +1542,9 @@ class Window(QMainWindow):
             pg.show(self.dataUI.invData.mesh, ax=self.invModelGraph.axes)
             self.invModelGraph.draw()
             self.dataUI.meshLoaded = True
-            self.statusBar.showMessage(f'Mesh loaded from {fName}')
+            self.statusBar.showMessage(f'Mesh loaded from {fName}', 10000)
         else:
-            self.statusBar.showMessage('No mesh could be loaded!')
+            self.statusBar.showMessage('No mesh could be loaded!', 2000)
 
     def _loadInitModel(self):
         # Load an existing model as the starting model (*.vector) for the inversion
@@ -1550,22 +1555,22 @@ class Window(QMainWindow):
             try:
                 pg.show(self.dataUI.invData.mesh, self.dataUI.invData.startModel, ax=self.invModelGraph.axes)
                 self.invModelGraph.draw()
-                self.statusBar.showMessage(f'Initial model loaded from {fName}')
+                self.statusBar.showMessage(f'Initial model loaded from {fName}', 10000)
             except:
                 QMessageBox.warning(self, 'Warning !', 'The initial model and the current mesh do not match in size!')
                 self.dataUI.invData.startModel = None
-                self.statusBar.showMessage('No initial model loaded!')
+                self.statusBar.showMessage('No initial model loaded!', 2000)
         else:
-            self.statusBar.showMessage('No initial model loaded!')
+            self.statusBar.showMessage('No initial model loaded!', 2000)
 
     def _saveInvMesh(self):
         # Save the inversion mesh (*.poly)
         fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='GIMLi mesh file (*.bms)')
         if fName != "":
             self.dataUI.invData.mesh.save(fName)
-            self.statusBar.showMessage(f'Mesh saved to {fName}')
+            self.statusBar.showMessage(f'Mesh saved to {fName}', 10000)
         else:
-            self.statusBar.showMessage('No mesh saved!')
+            self.statusBar.showMessage('No mesh saved!', 2000)
 
     def _saveInvAsVTK(self):
         # Save the inversion results into a VTK file (for Paraview)
@@ -1579,27 +1584,27 @@ class Window(QMainWindow):
             C = mgr.fop.constraintsRef()
             m.addData("Standardized Coverage [/]", np.sign(np.absolute(C.transMult(C * coverage))))
             m.exportVTK(fName)
-            self.statusBar.showMessage(f'Results saved to {fName}')
+            self.statusBar.showMessage(f'Results saved to {fName}', 10000)
         else:
-            self.statusBar.showMessage('Results where NOT saved!')
+            self.statusBar.showMessage('Results where NOT saved!', 2000)
 
     def _saveInvResponse(self):
         # Save the model response for the last iteration (*.vector)
         fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Response Vector file (*.vector)')
         if fName != "":
             np.savetxt(fName, self.dataUI.invData.manager.inv.response)
-            self.statusBar.showMessage(f'Response saved to {fName}')
+            self.statusBar.showMessage(f'Response saved to {fName}', 10000)
         else:
-            self.statusBar.showMessage('Response was NOT saved!')
+            self.statusBar.showMessage('Response was NOT saved!', 2000)
 
     def _saveInvResult(self):
         # Save the model for the last iteration (*.vector)
         fName, _ = QFileDialog.getSaveFileName(self,'Select file to save',filter='Result Vector file (*.vector)')
         if fName != "":
             np.savetxt(fName, self.dataUI.invData.manager.model)
-            self.statusBar.showMessage(f'Result saved to {fName}')
+            self.statusBar.showMessage(f'Result saved to {fName}', 10000)
         else:
-            self.statusBar.showMessage('Result was NOT saved!')
+            self.statusBar.showMessage('Result was NOT saved!', 2000)
     
     def _pickTracesTabUI(self):
         importTab = QWidget(self.tabs)
@@ -1907,9 +1912,9 @@ class Window(QMainWindow):
             file = open(fName, 'wb')
             pickle.dump(dataLoaded,file)
             file.close()
-            self.statusBar.showMessage(f'Result saved to {fName}')
+            self.statusBar.showMessage(f'Result saved to {fName}', 10000)
         else:
-            self.statusBar.showMessage('Result was NOT saved!')
+            self.statusBar.showMessage('Result was NOT saved!', 2000)
 
     def loadStatePicking(self):
         fName, _ = QFileDialog.getOpenFileName(self,'Select file to load',filter='Pickled structure (*.pkl)')
@@ -1942,9 +1947,9 @@ class Window(QMainWindow):
                 self.dataUI.animationPicking.changedSelect = True
                 self.updateTab0()
             else:
-                self.statusBar.showMessage('Empty state loaded')
+                self.statusBar.showMessage('Empty state loaded', 2000)
         else:
-            self.statusBar.showMessage('No status loaded!')
+            self.statusBar.showMessage('No status loaded!', 2000)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
