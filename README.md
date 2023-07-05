@@ -22,6 +22,7 @@ Sardine Reborn has several functionalities. All are oriented towards the more pe
   - [Modelling](#modelling)
 - [References:](#references)
 - [Troubleshooting:](#troubleshooting)
+- [Collaboration:](#collaboration)
 
 Each of those functionalities have a dedicated tab in the UI. The user can save picking and models, as well as figures that are produced. 
 
@@ -215,3 +216,6 @@ Here are some common issues that can arise and how to troubelshoot them.
     You can change this behaviour by adding the abbreviations for your language in the `header.py` file of obspy (`...\obspy\io\seg2\header.py`). In case this does not resolve the issue, report back and create an issue with the `*.geometry` file, the `*.seg2` file and a log of the error message that was provided in your terminal.
 
 - More to be added... Please report issues you might enconter to help improve the code.
+
+# Collaboration:
+A huge thanks for @asuliege for the extensive testing of the code and all the feedback. 
