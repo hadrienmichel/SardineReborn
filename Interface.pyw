@@ -30,7 +30,11 @@ from matplotlib.figure import Figure
 from matplotlib.backend_bases import MouseButton
 ## Imports for the seismic data input
 from obspy import read
-from obspy.signal.trigger import aic_simple
+try:
+    from obspy.signal.trigger import aic_simple
+    aic_simple_import = False
+except:
+    aic_simple_import = False
 ## Imports for the data inversion
 import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
@@ -1084,18 +1088,22 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
     
     def autoPicking(self):
-        pBar = QProgressBar(self)
-        nbTraces = len(self.dataUI.sisData)*len(self.dataUI.sisData[0])
-        pBar.setMaximum(nbTraces)
-        for i, st in enumerate(self.dataUI.sisData):
-            for j, tr in enumerate(st):
-                aic_f = aic_simple(tr.data)
-                p_idx = aic_f.argmin()
-                self.dataUI.picking[i, j] = p_idx/tr.stats.sampling_rate
-                self.dataUI.pickingError[i, j] = 0.05 # max(self.dataUI.picking[i, j] * 0.05, 0.000001)
-                pBar.setValue((i*len(self.dataUI.sisData[0]) + (j)))
-        pBar.close()
-        self.dataUI.animationPicking.changedSelect = True
+        if aic_simple_import:
+            pBar = QProgressBar(self)
+            nbTraces = len(self.dataUI.sisData)*len(self.dataUI.sisData[0])
+            pBar.setMaximum(nbTraces)
+            for i, st in enumerate(self.dataUI.sisData):
+                for j, tr in enumerate(st):
+                    aic_f = aic_simple(tr.data)
+                    p_idx = aic_f.argmin()
+                    self.dataUI.picking[i, j] = p_idx/tr.stats.sampling_rate
+                    self.dataUI.pickingError[i, j] = 0.05 # max(self.dataUI.picking[i, j] * 0.05, 0.000001)
+                    pBar.setValue((i*len(self.dataUI.sisData[0]) + (j)))
+            pBar.close()
+            self.dataUI.animationPicking.changedSelect = True
+        else:
+            QMessageBox.warning(self, 'Warning !', 'Auto-picking not implemented in current version of obspy.')
+            return
     
     def traceNumberChanged(self, value):
         self.dataUI.animationPicking.currSelect = value
