@@ -38,7 +38,11 @@ except:
 ## Imports for the data inversion
 import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
-from pygimli.physics.traveltime import ratools, drawFirstPicks
+from pygimli.physics.traveltime import drawFirstPicks
+try: 
+    from pygimli.physics.traveltime.ratools import createGradientModel2D
+except:
+    from pygimli.physics.traveltime import createGradientModel2D
 from pygimli.viewer import show as pgshow
 ## Imports for saving/reading states:
 import pickle
@@ -261,7 +265,7 @@ class inversionData():
         self.data = None
         self.manager = None
     def setStartModelGradient(self, data, mesh):
-        self.startModel = pg.Vector(ratools.createGradientModel2D(data, mesh, self.vTop, self.vBottom))
+        self.startModel = pg.Vector(createGradientModel2D(data, mesh, self.vTop, self.vBottom))
 class modellingAnimation():
     def __init__(self) -> None:
         self.currPosition = [0, 0]
