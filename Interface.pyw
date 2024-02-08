@@ -336,7 +336,8 @@ class PickT0(QDialog):
         self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
         self.resize(600, 300)
         self.mainWindow = parent # In order to be able to plot elements and retreive values
-        self.nbValuesDisp = 300
+        self.nbValuesDisp = 3000
+        self.initialUpdate = False
         # Create the file selector:
         ## Comb Box for choosing the correct file to pick.
         self.comboBoxFilesPicking = QComboBox()
@@ -366,7 +367,7 @@ class PickT0(QDialog):
         self.slider = QSlider(Qt.Horizontal, self)
         self.slider.setRange(0,self.nbValuesDisp)
         self.slider.setValue(0)
-        self.slider.sliderReleased.connect(self.updateSlider)
+        # self.slider.sliderReleased.connect(self.updateSlider)
         self.slider.valueChanged.connect(self.updateAxisSlider)
         sliderLayout = QHBoxLayout()
         sliderLayout.addWidget(textPick)
@@ -476,7 +477,9 @@ class PickT0(QDialog):
                 else:
                     axTrace.axvline(0, color='g')
                     currPicking = 0
+                    self.initialUpdate = True
                     self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                    self.initialUpdate = False
             else:
                 currPicking = self.newT0[self.sisFileId]
                 axTrace.axvline(currPicking, color='g')
@@ -492,17 +495,20 @@ class PickT0(QDialog):
         # Recompute value slider position:
         currPick = float(self.currValue.text())
         sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+        self.initialUpdate = True
         self.slider.setValue(sliderPos)
+        self.initialUpdate = False
 
     def comboBoxChange(self, newId):
         self.sisFileId = newId
         self.graphUpdate()
 
-    def updateSlider(self):
-        currSlider = self.slider.value()
-        currPick = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
-        self.currValue.setText(str(currPick))
-        self.newT0[self.sisFileId] = float(currPick)
+    # def updateSlider(self):
+    #     pass
+    #     # currSlider = self.slider.value()
+    #     # currPick = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
+    #     # self.currValue.setText(str(currPick))
+    #     # self.newT0[self.sisFileId] = float(currPick)
         
     def updateAxisSlider(self):
         if self.signal is not None:
@@ -515,6 +521,10 @@ class PickT0(QDialog):
             axTrace.axvline(currPick, color='g')
             axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
             self.traceGraph.draw()
+            # Change values in the text box and back-end: 
+            if not(self.initialUpdate):
+                self.currValue.setText(str(currPick))
+                self.newT0[self.sisFileId] = float(currPick)
 
     def updateText(self):
         try:
