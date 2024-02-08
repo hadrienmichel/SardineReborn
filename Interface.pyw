@@ -185,7 +185,7 @@ def modelWithSlope(interS, vS):
 def calculateDistance(pts, pt):
     pts = np.asarray(pts)
     xDiff = pts[:,0] - pt[0]
-    yDiff = pts[:,1] = pt[1]
+    yDiff = pts[:,1] - pt[1]
     dist = np.sqrt(xDiff**2 + yDiff**2)
     return dist
 
@@ -389,6 +389,13 @@ class PickT0(QDialog):
         automatedLayout.addWidget(self.nbTraces)
         self.automatedPick.clicked.connect(self.automatedPicking)
 
+        # Text line for update:
+        self.textConfirm = QLabel('To confirm selection, close the window.', self)
+        self.textConfirm.setStyleSheet('background-color: cyan')
+        confirmLayout = QHBoxLayout()
+        confirmLayout.addWidget(self.textConfirm)
+        confirmLayout.setAlignment(Qt.AlignCenter)
+
         # Creating final layout:
         layout = QVBoxLayout()
         layout.addWidget(self.comboBoxFilesPicking)
@@ -397,6 +404,7 @@ class PickT0(QDialog):
         layout.addLayout(sliderLayout)
         layout.addLayout(valueLayout)
         layout.addLayout(automatedLayout)
+        layout.addLayout(confirmLayout)
 
         self.setLayout(layout)
         self.graphUpdate()
@@ -509,20 +517,30 @@ class PickT0(QDialog):
             self.traceGraph.draw()
 
     def updateText(self):
-        currPick = float(self.currValue.text())
-        sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
-        self.slider.setValue(sliderPos)        
-        # if self.signal is not None:
-        #     axTrace = self.traceGraph.axes 
-        #     # The source is located at the same position as a single trace
-        #     axTrace.clear()
-        #     axTrace.plot(self.timeSEG2[:self.nbValuesDisp], self.signal[:self.nbValuesDisp])
-        #     axTrace.axvline(currPick, color='g')
-        #     self.traceGraph.draw()
-        self.newT0[self.sisFileId] = float(currPick)
+        try:
+            currPick = float(self.currValue.text())
+            sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+            self.slider.setValue(sliderPos)        
+            self.newT0[self.sisFileId] = float(currPick)
+        except:
+            pass
 
     def getNewT0(self):
+        # Check that newT0 is up to date (necessary ?)
+        if self.signal is not None:
+            currSlider = self.slider.value()
+            currPickSlider = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
+            sliderPrecision = (self.timeSEG2[0] + (currSlider+1)*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp) - currPickSlider
+            currPickText = float(self.currValue.text())
+            if abs(currPickSlider - currPickText) < sliderPrecision:
+                if abs(self.newT0[self.sisFileId] - (currPickSlider+currPickText)/2) < sliderPrecision:
+                    pass
+                else:
+                    QMessageBox.warning(self,'Warning!','Possible error while executing.\nCheck the sismograms.')
+            else:
+                QMessageBox.warning(self,'Warning!','Possible error while executing.\nCheck the sismograms.')
         return self.newT0
+
 
 class Window(QMainWindow):
     def __init__(self) -> None:
