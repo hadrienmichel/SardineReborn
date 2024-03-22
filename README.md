@@ -52,6 +52,8 @@ __Attention: the current implementation of the code is not stable to user errors
 
 __Above all, avoid accents and specific characters in the path that leads to your data and saving location as some dependencies of the code cannot work with those!__
 
+___Example files are available in the `example` folder.___
+
 ## Picking
 ![Picking window layout](./images/pickingTab.PNG)
 
