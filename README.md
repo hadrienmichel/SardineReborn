@@ -30,16 +30,16 @@ Each of those functionalities have a dedicated tab in the UI. The user can save 
 To install the package and code, download the code using this link:
 [https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.4.0.zip](https://github.com/hadrienmichel/SardineReborn/archive/refs/tags/v0.4.0.zip). Un-zip the downloaded archive and locate the directory where it is placed (C:/my-directory)
 
-In `Anaconda prompt` run the following command (the file `seismic.yml` must be in the current directory):
+In `Anaconda prompt` run the following command (the file `sardineEnv.yml` must be in the current directory):
 ``` 
 cd "C:/my-directory"
-conda env create -f seismic.yml
+conda env create -f sardineEnv.yml
 ```
-This will create a new environement (called `seismic`) with the dependencies for the project.
+This will create a new environement (called `sardine`) with the dependencies for the project.
 
 Then, activate the environement:
 ```
-conda activate seismic
+conda activate sardine
 ```
 Once the enviroement created, you can run the code by typing in the command line:
 ```

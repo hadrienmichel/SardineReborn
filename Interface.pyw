@@ -28,6 +28,7 @@ NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'
 from matplotlib import animation
 from matplotlib.figure import Figure
 from matplotlib.backend_bases import MouseButton
+from matplotlib import pyplot
 ## Imports for the seismic data input
 from obspy import read
 try:
@@ -704,7 +705,7 @@ class Window(QMainWindow):
         reply = QMessageBox.question(self, 'Closing ...', 'Are you sure you want to quit?', QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
         if reply == QMessageBox.Ok:
             event.accept()
-            matplotlib.pyplot.close('all') # To get rid of the figure openning after the closing.
+            pyplot.close('all') # To get rid of the figure openning after the closing.
         else:
             event.ignore()
         
