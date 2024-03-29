@@ -6,6 +6,8 @@
 # Add option to pick along a line (DONE on 15-05-2023)
 # Add option to change the header (dt for example)
 # Add options for setting t0 : by value, by graphical picking, by line picking (automated?) (DONE on 22-05-2023)
+# If unable to pick negative times --> impossible to change offset when issue... 
+# If offset from station --> issue with graph in set-t0
 
 ## Imports for the inner functions
 import sys
@@ -486,7 +488,7 @@ class PickT0(QDialog):
                 axTrace.axvline(currPicking, color='g')
                 self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
                 self.currValue.setText(str(currPicking))
-        axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+            axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
         self.traceGraph.draw()
 
     def updateZoom(self):
@@ -740,7 +742,7 @@ class Window(QMainWindow):
                     self.dataUI.picking[self.dataUI.sisFileId,:] -= self.dataUI.animationPicking.mousePosition[0]
                     self.buttonTabPickingSetT0.setChecked(False)
                 else:
-                    if self.dataUI.animationPicking.mousePosition[0] < 0: # To remove a picked trace, click on times below 0
+                    if self.dataUI.animationPicking.mousePosition[0] < self.dataUI.beginTime[self.dataUI.sisFileId]: # To remove a picked trace, click on times below 0
                         self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
                         self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = np.nan
                         QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
