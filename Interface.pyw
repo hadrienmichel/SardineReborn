@@ -1307,6 +1307,7 @@ class Window(QMainWindow):
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
         self.dataUI.invData.data = pg.DataContainer(fname, sensorTokens='s g')
+        self.dataUI.invData.data.sortSensorsX(incX=True)
         self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
         self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
         self.invModelGraph.axes.clear()
