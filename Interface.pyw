@@ -6,8 +6,9 @@
 # Add option to pick along a line (DONE on 15-05-2023)
 # Add option to change the header (dt for example)
 # Add options for setting t0 : by value, by graphical picking, by line picking (automated?) (DONE on 22-05-2023)
-# If unable to pick negative times --> impossible to change offset when issue... 
+# If unable to pick negative times --> impossible to change offset when issue...
 # If offset from station --> issue with graph in set-t0
+# The offset datasets are currently still openning (bug) the set t=0 window with the graphs, even though the correct behaviour would be to ask to pick some traces befor hand.
 
 ## Imports for the inner functions
 import sys
@@ -19,37 +20,31 @@ import numpy as np
 import time
 import matplotlib
 from scipy import stats
-matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
-NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'),
-                                  (None, None, None, None), 
-                                  ('Pan', 'Left button pans, Ri...xes aspect', 'move', 'pan'), 
-                                  ('Zoom', 'Zoom to rectangle\nx/...xes aspect', 'zoom_to_rect', 'zoom'),
-                                  (None, None, None, None), 
-                                  ('Save', 'Save the figure', 'filesave', 'save_figure')]
 from matplotlib import animation
 from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
 from matplotlib.backend_bases import MouseButton
 from matplotlib import pyplot
 ## Imports for the seismic data input
 from obspy import read
 try:
     from obspy.signal.trigger import aic_simple
-    aic_simple_import = False
-except:
-    aic_simple_import = False
+    AIC_SIMPLE_IMPORT = False
+except ImportError:
+    AIC_SIMPLE_IMPORT = False
 ## Imports for the data inversion
 import pygimli as pg
 from pygimli.physics import TravelTimeManager as TTMgr
 from pygimli.physics.traveltime import drawFirstPicks
-try: 
+try:
     from pygimli.physics.traveltime.ratools import createGradientModel2D
-except:
+except ImportError:
     from pygimli.physics.traveltime import createGradientModel2D
 from pygimli.viewer import show as pgshow
 ## Imports for saving/reading states:
 import pickle
-## Imports for the GUI
+
 from PyQt5.QtWidgets import (
     QApplication,
     QWidget,
@@ -69,14 +64,23 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QPushButton,
     QSpinBox,
+    QDoubleSpinBox,
     QLabel,
     QGroupBox,
     QLineEdit)
-from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui
 
-defaultStatus = "Idle."
-defaultError = 0.01 # By default, the error on the picking is going to be 1%
+
+matplotlib.use('Qt5Agg')
+NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'),
+                                  (None, None, None, None), 
+                                  ('Pan', 'Left button pans, Ri...xes aspect', 'move', 'pan'), 
+                                  ('Zoom', 'Zoom to rectangle\nx/...xes aspect', 'zoom_to_rect', 'zoom'),
+                                  (None, None, None, None), 
+                                  ('Save', 'Save the figure', 'filesave', 'save_figure')]
+
+DEFAULT_STATUS = "Idle."
+DEFAULT_ERROR = 0.01 # By default, the error on the picking is going to be 1%
 
 def buildModel(sourceX, receiversX, times, nbLayers=2, orientation=1):
     '''BUILDMODEL is a function that computes a simple optimal model for 
@@ -196,22 +200,42 @@ def calculateDistance(pts, pt):
 # https://matplotlib.org/devdocs/gallery/widgets/polygon_selector_demo.html#polygon-selector (for the line selection)
 # https://build-system.fman.io/ (for building into executable)
 class MplCanvas(FigureCanvasQTAgg):
+    """
+    This class, MplCanvas, extends FigureCanvasQTAgg to create a custom canvas
+    for matplotlib figures that can be integrated into a PyQt application.
+    It sets up the figure, axes, and initial plot limits.
+    """
     def __init__(self, parent=None, width=5, height=4, dpi=75):
+        # Create a new figure with specified dimensions and resolution
         self.fig = Figure(figsize=(width, height), dpi=dpi)
+        # Add a single subplot to the figure
         self.axes = self.fig.add_subplot(111)
+        # Initialize colorbar attribute (to be set later)
         self.cBar = None # For the (eventual) colorbar
+        # Initialize the FigureCanvasQTAgg with our figure
         super(MplCanvas, self).__init__(self.fig)
+        # Set the parent widget for this canvas
         self.setParent(parent)
+        # Define the default x and y limits for the plot
         self.homeXLimits = (0,3)
         self.homeYLimits = (0,24)
 
 class CustomHomeToolbar(NavigationToolbar2QT):
+    """
+    This class, CustomHomeToolbar, extends NavigationToolbar2QT to create a custom toolbar
+    with a modified 'home' functionality. It's designed to work with a custom canvas
+    that has predefined 'home' limits for x and y axes.
+    """
     def __init__(self, canvas, parent):
+        # Initialize the parent class with the given canvas and parent
         super().__init__(canvas, parent)
-    
     def home(self):
+        # Override the default 'home' method
+        # Set the x-axis limits to the predefined 'home' limits
         self.canvas.axes.set_xlim(*self.canvas.homeXLimits)
+        # Set the y-axis limits to the predefined 'home' limits
         self.canvas.axes.set_ylim(*self.canvas.homeYLimits)
+        # Redraw the canvas to reflect the changes
         self.canvas.draw_idle()
 
 # class VerticalNavigationToolbar2QT(NavigationToolbar2QT):
@@ -331,7 +355,9 @@ class PickT0(QDialog):
     This window intends to propose multiple options for the t0 picking.
         - Manual picking from the trace at the source (DONE)
         - Setting an offset value (DONE)
-        - Using the picks that have been realise to interpolate the t0 at the source
+        - Using the picks that have been realise to interpolate the t0 at the source (DONE).
+        - Disableing the functionalities for offset triggers.
+        - Adapt zoom for pretrigger (zoom around the current t0 pick? - option ?).
     '''
     def __init__(self, parent):
         super().__init__()
@@ -339,7 +365,7 @@ class PickT0(QDialog):
         self.setWindowIcon(QtGui.QIcon('./images/SardineRebornLogo_100ppp.png'))
         self.resize(600, 300)
         self.mainWindow = parent # In order to be able to plot elements and retreive values
-        self.nbValuesDisp = 3000
+        self.nbValuesDisp = 2000 # From 0 to 999 negative values, 1000=0 from 1001 to 2000 positive
         self.initialUpdate = False
         # Create the file selector:
         ## Comb Box for choosing the correct file to pick.
@@ -351,14 +377,14 @@ class PickT0(QDialog):
                 textItem = name
         self.comboBoxFilesPicking.setCurrentText(textItem)
         self.comboBoxFilesPicking.currentIndexChanged.connect(self.comboBoxChange)
-        self.newT0 = np.zeros_like(self.mainWindow.dataUI.paths.seg2Files, dtype=np.float)
+        self.newT0 = np.zeros_like(self.mainWindow.dataUI.paths.seg2Files, dtype=float)
 
         # Creating the graph widget:
         self.traceGraph = MplCanvas(self, width=6, height=2)
 
         # Create the slider for graph:
         textZoom = QLabel('Zoom : ')
-        self.sliderZoom = QSlider(Qt.Horizontal, self)
+        self.sliderZoom = QSlider(QtCore.Qt.Horizontal, self)
         self.sliderZoom.setRange(1, 1000)
         self.sliderZoom.setValue(100)
         self.sliderZoom.valueChanged.connect(self.updateZoom)
@@ -367,14 +393,23 @@ class PickT0(QDialog):
         zoomLayout.addWidget(self.sliderZoom)
 
         textPick = QLabel('T0 offset : ')
-        self.slider = QSlider(Qt.Horizontal, self)
+        self.slider = QSlider(QtCore.Qt.Horizontal, self)
         self.slider.setRange(0,self.nbValuesDisp)
-        self.slider.setValue(0)
+        self.slider.setValue(int(self.nbValuesDisp/2)) # Initialize to "0.0"
         # self.slider.sliderReleased.connect(self.updateSlider)
         self.slider.valueChanged.connect(self.updateAxisSlider)
+        textRange = QLabel('Range : ')
+        self.rangeSlider = QDoubleSpinBox()
+        self.rangeSlider.setDecimals(1)
+        self.rangeSlider.setRange(0.1, 1.0)
+        self.rangeSlider.setSingleStep(0.1)
+        self.rangeSlider.setValue(0.1)
+        self.rangeSlider.valueChanged.connect(self.updateRangeSlider)
         sliderLayout = QHBoxLayout()
         sliderLayout.addWidget(textPick)
         sliderLayout.addWidget(self.slider)
+        sliderLayout.addWidget(textRange)
+        sliderLayout.addWidget(self.rangeSlider)
         # Creating the widget with the current value (can be changed by the user):
         self.textLabel1 = QLabel('Value of time offset : ')
         self.currValue = QLineEdit(str(0), self)
@@ -398,7 +433,7 @@ class PickT0(QDialog):
         self.textConfirm.setStyleSheet('background-color: cyan')
         confirmLayout = QHBoxLayout()
         confirmLayout.addWidget(self.textConfirm)
-        confirmLayout.setAlignment(Qt.AlignCenter)
+        confirmLayout.setAlignment(QtCore.Qt.AlignCenter)
 
         # Creating final layout:
         layout = QVBoxLayout()
@@ -470,37 +505,61 @@ class PickT0(QDialog):
                 break
         if found:
             # The source is located at the same position as a single trace
+            self.sliderZoom.setEnabled(True)
+            self.slider.setEnabled(True)
             axTrace.plot(timeSEG2, self.signal)
             if self.newT0[self.sisFileId] == 0:
                 currPicking = self.mainWindow.dataUI.picking[currFile, i]
                 if not(np.isnan(currPicking)):
                     axTrace.axvline(currPicking, color='g')
-                    self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                    rangeValue = self.rangeSlider.value()
+                    sliderPos = int(currPicking/rangeValue * self.nbValuesDisp/2 + self.nbValuesDisp/2)
+                    if sliderPos < 0:
+                        sliderPos = 0
+                        currPicking = -rangeValue
+                    elif sliderPos > self.nbValuesDisp:
+                        sliderPos = self.nbValuesDisp
+                        currPicking = rangeValue
+                    self.slider.setValue(sliderPos)
                     self.currValue.setText(str(currPicking))
                 else:
                     axTrace.axvline(0, color='g')
                     currPicking = 0
+                    sliderPos = int(self.nbValuesDisp/2)
                     self.initialUpdate = True
-                    self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                    self.slider.setValue(sliderPos)
                     self.initialUpdate = False
             else:
                 currPicking = self.newT0[self.sisFileId]
                 axTrace.axvline(currPicking, color='g')
-                self.slider.setValue(int((currPicking-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp))
+                rangeValue = self.rangeSlider.value()
+                sliderPos = int(currPicking/rangeValue * self.nbValuesDisp/2 + self.nbValuesDisp/2)
+                if sliderPos < 0:
+                    sliderPos = 0
+                    currPicking = -rangeValue
+                elif sliderPos > self.nbValuesDisp:
+                    sliderPos = self.nbValuesDisp
+                    currPicking = rangeValue
+                self.slider.setValue(sliderPos)
                 self.currValue.setText(str(currPicking))
-            axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+            axTrace.set_xlim(currPicking - self.sliderZoom.value()/1000, currPicking + self.sliderZoom.value()/1000) #axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+        else:
+            # The source is not located at the position of a receiver. t0 cannot be picked from the graph. 
+            self.sliderZoom.setEnabled(False)
+            self.slider.setEnabled(False)
         self.traceGraph.draw()
 
     def updateZoom(self):
         axTrace = self.traceGraph.axes
-        axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+        currPicking = float(self.currValue.text())
+        axTrace.set_xlim(currPicking - self.sliderZoom.value()/1000, currPicking + self.sliderZoom.value()/1000) #self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
         self.traceGraph.draw()
-        # Recompute value slider position:
-        currPick = float(self.currValue.text())
-        sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
-        self.initialUpdate = True
-        self.slider.setValue(sliderPos)
-        self.initialUpdate = False
+        # # Recompute value slider position:
+        # currPick = float(self.currValue.text())
+        # sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
+        # self.initialUpdate = True
+        # self.slider.setValue(sliderPos)
+        # self.initialUpdate = False
 
     def comboBoxChange(self, newId):
         self.sisFileId = newId
@@ -515,28 +574,50 @@ class PickT0(QDialog):
         
     def updateAxisSlider(self):
         if self.signal is not None:
-            axTrace = self.traceGraph.axes 
+            axTrace = self.traceGraph.axes
             # The source is located at the same position as a single trace
             axTrace.clear()
             currSlider = self.slider.value()
-            currPick = self.timeSEG2[0] + currSlider*(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])/self.nbValuesDisp
+            rangeValue = self.rangeSlider.value()
+            currPicking = ((currSlider - self.nbValuesDisp/2)/(self.nbValuesDisp/2))*rangeValue
             axTrace.plot(self.timeSEG2, self.signal)
-            axTrace.axvline(currPick, color='g')
-            axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+            axTrace.axvline(currPicking, color='g')
+            axTrace.set_xlim(currPicking - self.sliderZoom.value()/1000, currPicking + self.sliderZoom.value()/1000) #self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
+            # axTrace.set_xlim(self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
             self.traceGraph.draw()
-            # Change values in the text box and back-end: 
+            # Change values in the text box and back-end:
             if not(self.initialUpdate):
-                self.currValue.setText(str(currPick))
-                self.newT0[self.sisFileId] = float(currPick)
+                self.currValue.setText(str(currPicking))
+                self.newT0[self.sisFileId] = float(currPicking)
 
     def updateText(self):
         try:
-            currPick = float(self.currValue.text())
-            sliderPos = int((currPick-self.timeSEG2[0])/(((self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())-self.timeSEG2[0])*self.nbValuesDisp)
-            self.slider.setValue(sliderPos)        
-            self.newT0[self.sisFileId] = float(currPick)
+            currPicking = float(self.currValue.text())
+            rangeValue = self.rangeSlider.value()
+            sliderPos = int(currPicking/rangeValue * self.nbValuesDisp/2 + self.nbValuesDisp/2)
+            if sliderPos < 0:
+                sliderPos = 0
+                currPicking = -rangeValue
+            elif sliderPos > self.nbValuesDisp:
+                sliderPos = self.nbValuesDisp
+                currPicking = rangeValue
+            self.slider.setValue(sliderPos)
+            self.newT0[self.sisFileId] = float(currPicking)
         except:
             pass
+
+    def updateRangeSlider(self):
+        rangeValue = self.rangeSlider.value() # New range value
+        # We need to update the slider min/max values accordingly.
+        currPicking = float(self.currValue.text())
+        sliderPos = int(currPicking/rangeValue * self.nbValuesDisp/2 + self.nbValuesDisp/2)
+        if sliderPos < 0:
+            sliderPos = 0
+        elif sliderPos > self.nbValuesDisp:
+            sliderPos = self.nbValuesDisp
+        self.initialUpdate = True
+        self.slider.setValue(sliderPos)
+        self.initialUpdate = False
 
     def getNewT0(self):
         # Check that newT0 is up to date (necessary ?)
@@ -696,7 +777,7 @@ class Window(QMainWindow):
     ## Oppening and closing message boxes:
     def showEvent(self, event):
         msgBox = QMessageBox(self)
-        msgBox.setIconPixmap(QtGui.QPixmap('./images/SardineRebornLogo_100ppp.png').scaled(200,100,aspectRatioMode=Qt.KeepAspectRatio))
+        msgBox.setIconPixmap(QtGui.QPixmap('./images/SardineRebornLogo_100ppp.png').scaled(200,100,aspectRatioMode=QtCore.Qt.KeepAspectRatio))
         msgBox.setText('Welcome to Sardine Reborn!')
         msgBox.setInformativeText('by Hadrien Michel (2022)')
         msgBox.setWindowTitle('Welcome!')
@@ -748,7 +829,7 @@ class Window(QMainWindow):
                         QMessageBox.warning(self,'Warning!','Negative time are not physically possible!')
                     else:
                         self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = self.dataUI.animationPicking.mousePosition[0]
-                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = defaultError # max(self.dataUI.animationPicking.mousePosition[0]*defaultError, 0.000001) # Default error is 3%
+                        self.dataUI.pickingError[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect] = DEFAULT_ERROR # max(self.dataUI.animationPicking.mousePosition[0]*DEFAULT_ERROR, 0.000001) # Default error is 3%
                 self.dataUI.animationPicking.changedSelect = True
             else:
                 yPicks = [self.dataUI.animationPicking.mousePositionInit[1], self.dataUI.animationPicking.mousePosition[1]]
@@ -764,7 +845,7 @@ class Window(QMainWindow):
                         timePick = m*(currPick-yPicks[idMin]) + xPicks[idMin]
                         if timePick > 0:
                             self.dataUI.picking[self.dataUI.sisFileId, currPick] = timePick
-                            self.dataUI.pickingError[self.dataUI.sisFileId, currPick] = defaultError # max(timePick*defaultError, 0.000001) # Default error is 3%
+                            self.dataUI.pickingError[self.dataUI.sisFileId, currPick] = DEFAULT_ERROR # max(timePick*DEFAULT_ERROR, 0.000001) # Default error is 3%
                 self.dataUI.animationPicking.changedSelect = True
             if event.button == MouseButton.RIGHT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength): # If right click and not dragging accross the pannel
                 if not(np.isnan(self.dataUI.picking[self.dataUI.sisFileId, self.dataUI.animationPicking.currSelect])):
@@ -822,17 +903,17 @@ class Window(QMainWindow):
         timeSEG2 = np.arange(self.dataUI.beginTime[self.dataUI.sisFileId], self.dataUI.beginTime[self.dataUI.sisFileId]+nbPoints*deltaT, deltaT)
         # Change plot to go at the correct position:
         axZoom.clear()
-        idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]-150*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]+150*deltaT)
+        idx = np.greater_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]-100*deltaT) & np.less_equal(timeSEG2,self.dataUI.animationPicking.mousePosition[0]+100*deltaT)
         timeZoom = timeSEG2[idx]
         axZoom.axhline(y=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
         axZoom.axvline(x=0, linewidth=0.5, color=[0.5, 0.5, 0.5])
         vals = self.dataUI.sisData[self.dataUI.sisFileId][self.dataUI.animationPicking.currSelect].data[idx]
         axZoom.plot(timeZoom,vals,color='k')
-        axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition[0]-150*deltaT,right=self.dataUI.animationPicking.mousePosition[0]+150*deltaT)
+        axZoom.set_xlim(left=self.dataUI.animationPicking.mousePosition[0]-100*deltaT,right=self.dataUI.animationPicking.mousePosition[0]+100*deltaT)
         if len(vals) < 1:
             maxVal = 0.5
         else:
-            maxVal = max(np.abs(vals))
+            maxVal = np.percentile(np.abs(vals),75)
         axZoom.set_ylim(top=maxVal, bottom=-maxVal)# autoscale(axis='y')
         # z = axZoom.get_ylim()
         axZoom.axvline(self.dataUI.animationPicking.mousePosition[0], color='r')
@@ -1123,7 +1204,7 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
     
     def autoPicking(self):
-        if aic_simple_import:
+        if AIC_SIMPLE_IMPORT:
             pBar = QProgressBar(self)
             nbTraces = len(self.dataUI.sisData)*len(self.dataUI.sisData[0])
             pBar.setMaximum(nbTraces)
@@ -1154,8 +1235,10 @@ class Window(QMainWindow):
         self.connectPress = self.mainGraph.mpl_connect('button_press_event', self.onPress)
         self.connectRelease = self.mainGraph.mpl_connect('button_release_event', self.onRelease)
         self.connectKeyPress = self.mainGraph.mpl_connect('key_press_event', self.onKeyPress)
-        self.aniMain = animation.FuncAnimation(self.mainGraph.fig, self.animationMain, interval=16.7)
-        self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7)
+        self.aniMain = animation.FuncAnimation(self.mainGraph.fig, self.animationMain, interval=16.7,
+                                                cache_frame_data=False)
+        self.aniZoom = animation.FuncAnimation(self.zoomGraph.fig, self.animationZoom, interval=16.7, 
+                                               cache_frame_data=False)
         self.mainGraph.draw()
         self.zoomGraph.draw()
 
@@ -1297,7 +1380,7 @@ class Window(QMainWindow):
                     if len(measurements[i,:]) > 3:
                         self.dataUI.pickingError[sId, rId] = errCurr #/pickCurr # Attention, breaks backward compatibility!!!
                     else:
-                        self.dataUI.pickingError[sId, rId] = defaultError
+                        self.dataUI.pickingError[sId, rId] = DEFAULT_ERROR
                 self.statusBar.showMessage(f'Data loaded with picking on graphs', 10000)
                 self.dataUI.animationPicking.changedSelect = True
             self.filePicksPath.setText(fName)
@@ -1307,6 +1390,7 @@ class Window(QMainWindow):
     def _initPygimli(self, fname):
         ## Preparing inversion of data (pygimli)
         self.dataUI.invData.data = pg.DataContainer(fname, sensorTokens='s g')
+        self.dataUI.invData.data.sortSensorsX(incX=True)
         self.dataUI.invData.manager = TTMgr(self.dataUI.invData.data)
         self.dataUI.invData.mesh = self.dataUI.invData.manager.createMesh(data=self.dataUI.invData.data, paraMaxCellSize=self.dataUI.invData.meshMaxCellSize, paraDepth=self.dataUI.invData.meshDepthMax)
         self.invModelGraph.axes.clear()
@@ -1579,7 +1663,7 @@ class Window(QMainWindow):
     #     # TODO
     #     self.statusBar.showMessage('Saving current model . . .')
     #     time.sleep(10)
-    #     self.statusBar.showMessage(defaultStatus)
+    #     self.statusBar.showMessage(DEFAULT_STATUS)
 
     def _loadInvMesh(self):
         # Load an inversion mesh that was already created (*.poly)
@@ -1752,7 +1836,7 @@ class Window(QMainWindow):
         layout = QGridLayout(self.tabs)
         ## Selecting the picking file:
         self.filePicksPath = QLabel('File path', inversionTab)
-        self.filePicksPath.setAlignment(Qt.AlignCenter)
+        self.filePicksPath.setAlignment(QtCore.Qt.AlignCenter)
         self.buttonGetSgtFile = QPushButton('...', inversionTab)
         self.buttonGetSgtFile.clicked.connect(self._loadPicking)
         layout.addWidget(self.filePicksPath, 0, 0, 1, 9)
@@ -1766,14 +1850,14 @@ class Window(QMainWindow):
         self.dataGraph = MplCanvas(inversionTab)
         dataGraphToolbar = NavigationToolbar2QT(self.dataGraph, inversionTab)
         dataGraphLayout = QVBoxLayout()
-        dataGraphLayout.addWidget(dataGraphToolbar, alignment=Qt.AlignRight)
+        dataGraphLayout.addWidget(dataGraphToolbar, alignment=QtCore.Qt.AlignRight)
         dataGraphLayout.addWidget(self.dataGraph)
         layout.addLayout(dataGraphLayout, 1, 5, 5, 5)
         self.fitGraph = MplCanvas(inversionTab)
         fitGraphToolbar = NavigationToolbar2QT(self.fitGraph, inversionTab)
         fitGraphLayout = QVBoxLayout()
         fitGraphLayout.addWidget(self.fitGraph)
-        fitGraphLayout.addWidget(fitGraphToolbar, alignment=Qt.AlignRight)
+        fitGraphLayout.addWidget(fitGraphToolbar, alignment=QtCore.Qt.AlignRight)
         layout.addLayout(fitGraphLayout, 6, 5, 5, 5)
         self.groupeOption = QGroupBox(inversionTab)
         self.groupeOption.setTitle('Inversion options')
@@ -1897,20 +1981,20 @@ class Window(QMainWindow):
         modellingTab = QWidget()
         # Pick loading
         self.filePicksPath = QLabel('File path', modellingTab)
-        self.filePicksPath.setAlignment(Qt.AlignCenter)
+        self.filePicksPath.setAlignment(QtCore.Qt.AlignCenter)
         self.buttonGetSgtFile = QPushButton('...', modellingTab)
         self.buttonGetSgtFile.clicked.connect(self._loadPicking)
         # Graph with the hodochrones:
         self.hodochronesGraph = MplCanvas(modellingTab)
         hodochronesToolbar = NavigationToolbar2QT(self.hodochronesGraph, modellingTab)
         hodochronesWidget = QVBoxLayout()
-        hodochronesWidget.addWidget(hodochronesToolbar, alignment=Qt.AlignLeft)
+        hodochronesWidget.addWidget(hodochronesToolbar, alignment=QtCore.Qt.AlignLeft)
         hodochronesWidget.addWidget(self.hodochronesGraph)
         # Graph with the model
         self.modelGraph = MplCanvas(modellingTab)
         modelToolbar = NavigationToolbar2QT(self.modelGraph, modellingTab)
         modelWidget = QVBoxLayout()
-        modelWidget.addWidget(modelToolbar, alignment=Qt.AlignRight)
+        modelWidget.addWidget(modelToolbar, alignment=QtCore.Qt.AlignRight)
         modelWidget.addWidget(self.modelGraph)
         # Options for the tab:
         self.groupOptionModelling = QGroupBox()
@@ -1919,7 +2003,7 @@ class Window(QMainWindow):
         self.receiversSelector = QComboBox(self.groupOptionModelling)
         labelSourceReceiver = QLabel('Select source and orientation :',self.groupOptionModelling)
         layoutOptions = QGridLayout()
-        layoutOptions.addWidget(labelSourceReceiver, 1, 0, 1, 4, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(labelSourceReceiver, 1, 0, 1, 4, alignment=QtCore.Qt.AlignRight)
         layoutOptions.addWidget(self.sourceSelector, 1, 4, 1, 4)
         layoutOptions.addWidget(self.receiversSelector, 1, 8, 1, 2)
         self.movePoints = QPushButton('Move Points', self.groupOptionModelling)
@@ -1931,7 +2015,7 @@ class Window(QMainWindow):
         self.nbLayersSelector.setValue(self.dataUI.modellingData.nbLayers)
         self.nbLayersSelector.valueChanged.connect(self._initModelling)
         nbLayersLabel = QLabel('Select the number of layers :')
-        layoutOptions.addWidget(nbLayersLabel, 0, 0, 1, 5, alignment=Qt.AlignRight)
+        layoutOptions.addWidget(nbLayersLabel, 0, 0, 1, 5, alignment=QtCore.Qt.AlignRight)
         layoutOptions.addWidget(self.nbLayersSelector, 0, 5, 1, 5)
         layoutOptions.addWidget(self.movePoints, 2, 0, 1, 10)
         self.groupOptionModelling.setLayout(layoutOptions)
