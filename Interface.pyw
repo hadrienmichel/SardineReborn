@@ -82,7 +82,7 @@ NavigationToolbar2QT.toolitems = [('Home', 'Reset original view', 'home', 'home'
                                   ('Save', 'Save the figure', 'filesave', 'save_figure')]
 
 DEFAULT_STATUS = "Idle."
-DEFAULT_ERROR = 0.01  # By default, the error on the picking is going to be 1%
+DEFAULT_ERROR = 0.03  # By default, the error on the picking is going to be 3%
 
 
 def build_model(sourceX, receiversX, times, nbLayers=2, orientation=1):
@@ -1481,7 +1481,7 @@ class Window(QMainWindow):
             f.write('#s\tg\tt\terr\n')
             for i in range(nbMeas):
                 f.write('%d\t%d\t%f\t%f\n' % (
-                    picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]))
+                    picksSave[i][0]+1, picksSave[i][1]+1, picksSave[i][2], picksSave[i][3]*picksSave[i][2]))
             f.close()
             self.statusBar.showMessage(f'Picking saved at: {fname}.', 10000)
             self.filePicksPath.setText(fname)
