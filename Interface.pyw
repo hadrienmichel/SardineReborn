@@ -1,3 +1,13 @@
+"""Sardine Reborn desktop application for seismic-refraction processing.
+
+The module provides the complete Qt user interface and the numerical helpers
+used to load SEG-2 data, pick first arrivals, build layered starting models,
+run pyGIMLi travel-time inversions, and display or export the results.
+
+Times are expressed in seconds, distances in metres, and velocities in metres
+per second unless a function explicitly states otherwise.
+"""
+
 # TODO/IDEAS
 # Add option to merge similar sources/receivers at loading of geometry file (new files to add with similar paths (roll-along support))
 # Add posibilities for auto-picking (DONE on 04-09-2026 David Caterina)
@@ -107,6 +117,24 @@ DEFAULT_ERROR = 0.03  # By default, the error on the picking is going to be 3%
 def absolute_pick_error(relative_error, travel_time, sample_interval):
     """Return a strictly positive travel-time uncertainty in seconds.
 
+    Parameters
+    ----------
+    relative_error : float
+        Relative picking uncertainty expressed as a fraction of travel time.
+        Invalid or non-positive values are replaced by ``DEFAULT_ERROR``.
+    travel_time : float
+        Picked travel time in seconds.
+    sample_interval : float
+        Sampling interval in seconds.
+
+    Returns
+    -------
+    float
+        Absolute uncertainty in seconds, with a floor of half a sample or one
+        microsecond, whichever is larger.
+
+    Notes
+    -----
     The picker stores relative errors internally.  pyGIMLi's ``err`` field,
     however, is an absolute uncertainty in the same unit as ``t``.  A
     half-sample floor keeps the exported uncertainty meaningful at (or before)
@@ -131,23 +159,35 @@ def absolute_pick_error(relative_error, travel_time, sample_interval):
 
 
 def build_model(sourceX, receiversX, times, nbLayers=2, orientation=1):
-    '''BUILD MODEL is a function that computes a simple optimal model for 
-    a given set of source, receivers and traveltimes.
-    It computes the curvature of the TT and detects breaks in the hodochrones.
-    It serves only as a first guess and should not be used as an optimal model!
+    """Estimate a layered starting model from one travel-time branch.
 
-    Inputs:
-        - sourceX:
-        - receiversX:
-        - times:
-        - nbLayers (default=2):
-        - orientation (default=1):
+    Parameters
+    ----------
+    sourceX : float
+        Horizontal source coordinate in metres.
+    receiversX : array-like
+        Horizontal receiver coordinates in metres.
+    times : array-like
+        First-arrival travel times in seconds, ordered like ``receiversX``.
+    nbLayers : int, default=2
+        Number of linear hodograph segments to estimate.
+    orientation : {1, -1}, default=1
+        Profile direction relative to the source.
 
-    Outputs:
-        - interceptTimes:
-        - apparentVelocities:
+    Returns
+    -------
+    intercept_times : numpy.ndarray
+        Time-axis intercept of every fitted hodograph segment, in seconds.
+    apparent_velocities : numpy.ndarray
+        Apparent velocity of every segment, in metres per second.
+    points : numpy.ndarray
+        ``(x, time)`` coordinates delimiting the fitted segments.
 
-    '''
+    Notes
+    -----
+    Curvature maxima define candidate changes of slope. The result is intended
+    only as an inversion starting model, not as a final geological model.
+    """
     # Change the coordinates if requiered and normalize to sourceX = 0:
     receiversXSave = receiversX
     if orientation < 0:
@@ -196,6 +236,24 @@ def build_model(sourceX, receiversX, times, nbLayers=2, orientation=1):
 
 
 def model1D(inter, v):
+    """Derive horizontal-layer thicknesses from intercept times and velocities.
+
+    Parameters
+    ----------
+    inter : array-like
+        Intercept time for each refracted branch, in seconds.
+    v : array-like
+        Layer velocities in metres per second, ordered from top to bottom.
+
+    Returns
+    -------
+    thicknesses : numpy.ndarray
+        Estimated thickness of each layer above the half-space, in metres.
+    velocities : array-like
+        The input velocity vector, returned unchanged.
+    positions : numpy.ndarray
+        Cumulative horizontal and depth coordinates of the interfaces.
+    """
     h = np.ones((len(v)-1,))
     pos = np.zeros((len(v), 2))
     for i in np.arange(1, len(v)):
@@ -212,8 +270,29 @@ def model1D(inter, v):
 
 
 def modelWithSlope(interS, vS):
-    '''Model from MOTA L. (1954) entiteld "Determination of dips and depths of geological layers by the seismic refraction method"
-    '''
+    """Estimate dipping-layer geometry from reciprocal apparent velocities.
+
+    Parameters
+    ----------
+    interS : array-like
+        Intercept times for forward and reverse shots, with one row per layer.
+    vS : array-like
+        Forward and reverse apparent velocities in metres per second, with one
+        row per layer.
+
+    Returns
+    -------
+    velocities : list of float
+        Estimated true layer velocities in metres per second.
+    left_thicknesses, right_thicknesses : list of float
+        Interface-normal thicknesses below the two profile ends, in metres.
+
+    Notes
+    -----
+    The calculation follows Mota (1954), "Determination of dips and depths of
+    geological layers by the seismic refraction method", for two or three
+    layers.
+    """
     nbLayers = np.shape(vS)[0]
     # We take the mean velocity between the two possibilities
     v0 = np.sum(vS[0, :])/2
@@ -249,6 +328,20 @@ def modelWithSlope(interS, vS):
 
 
 def calculateDistance(pts, pt):
+    """Return the Euclidean distance from every point in ``pts`` to ``pt``.
+
+    Parameters
+    ----------
+    pts : array-like, shape (n, 2)
+        Coordinates of the points whose distances are required.
+    pt : array-like, shape (2,)
+        Reference coordinate.
+
+    Returns
+    -------
+    numpy.ndarray, shape (n,)
+        Distance from each point to the reference coordinate.
+    """
     pts = np.asarray(pts)
     xDiff = pts[:, 0] - pt[0]
     yDiff = pts[:, 1] - pt[1]
@@ -257,7 +350,24 @@ def calculateDistance(pts, pt):
 
 
 def hybrid_pick_candidates(signal, start_idx, stop_idx, max_candidates=6):
-    """Return AIC-refined STA/LTA candidates for one seismic trace."""
+    """Return AIC-refined STA/LTA candidates for one seismic trace.
+
+    Parameters
+    ----------
+    signal : array-like
+        One-dimensional seismic-amplitude samples.
+    start_idx, stop_idx : int
+        Half-open sample-index interval in which candidates are sought.
+    max_candidates : int, default=6
+        Maximum number of candidates returned after duplicate removal.
+
+    Returns
+    -------
+    list of dict
+        Candidates sorted by decreasing confidence. Each dictionary contains
+        ``index``, ``confidence``, ``cost``, and ``snr``. An empty list means
+        that no reliable onset could be extracted.
+    """
     values = np.asarray(signal, dtype=float)
     start_idx = max(0, int(start_idx))
     stop_idx = min(values.size, int(stop_idx))
@@ -364,7 +474,26 @@ def hybrid_pick_candidates(signal, start_idx, stop_idx, max_candidates=6):
 
 def near_source_energy_candidate(signal, begin_time, dt,
                                  start_idx, stop_idx):
-    """Detect the first persistent energy rise close to a seismic source."""
+    """Detect the first persistent energy rise close to a seismic source.
+
+    Parameters
+    ----------
+    signal : array-like
+        One-dimensional seismic-amplitude samples.
+    begin_time : float
+        Time of the first sample in seconds, relative to the current t0.
+    dt : float
+        Sampling interval in seconds.
+    start_idx, stop_idx : int
+        Half-open sample-index interval allowed for the search.
+
+    Returns
+    -------
+    dict or None
+        Candidate metadata containing its sample ``index``, ``confidence``,
+        ``cost``, ``snr``, and a ``near_source_onset`` flag; ``None`` when no
+        persistent high-SNR energy onset satisfies the checks.
+    """
     values = np.asarray(signal, dtype=float)
     start_idx = max(0, int(start_idx))
     stop_idx = min(values.size, int(stop_idx))
@@ -435,7 +564,22 @@ def near_source_energy_candidate(signal, begin_time, dt,
 
 
 def _robust_line_prediction(x, y, query_x=None):
-    """Fit a line without letting one late phase control the prediction."""
+    """Fit a line without letting one late phase control the prediction.
+
+    Parameters
+    ----------
+    x, y : array-like
+        Coordinates of the observations used to fit the trend.
+    query_x : array-like or None, optional
+        Coordinates at which to evaluate the trend. The values in ``x`` are
+        used when this argument is omitted.
+
+    Returns
+    -------
+    numpy.ndarray
+        Predicted ``y`` values at ``query_x``. A Theil-Sen fit is used for at
+        least three observations; smaller inputs use a linear fit.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     query_x = x if query_x is None else np.asarray(query_x, dtype=float)
@@ -452,7 +596,23 @@ def _robust_line_prediction(x, y, query_x=None):
 
 
 def _candidate_for_trend(candidates, prediction, tolerance):
-    """Return the best waveform candidate close enough to one trend."""
+    """Return the best waveform candidate close enough to one trend.
+
+    Parameters
+    ----------
+    candidates : sequence of dict
+        Waveform candidates containing at least ``index`` and ``cost``.
+    prediction : float
+        Expected arrival sample derived from the spatial trend.
+    tolerance : float
+        Nominal admissible residual in samples.
+
+    Returns
+    -------
+    tuple
+        ``(candidate, score)`` for the lowest-cost nearby candidate, or
+        ``(None, numpy.inf)`` if none lies within three tolerances.
+    """
     nearby = [candidate for candidate in candidates
               if abs(candidate['index']-prediction) <= 3.0*tolerance]
     if not nearby:
@@ -468,7 +628,27 @@ def _candidate_for_trend(candidates, prediction, tolerance):
 
 def _forward_trend_guard(selected, candidates_by_trace, order, x,
                          tolerance):
-    """Keep an isolated bad trace out of the trend used by later receivers."""
+    """Keep an isolated bad trace out of the trend used by later receivers.
+
+    Parameters
+    ----------
+    selected : dict
+        Current mapping from trace identifiers to selected candidates.
+    candidates_by_trace : sequence or mapping
+        Candidate lists indexed by trace identifier.
+    order : sequence of int
+        Trace identifiers ordered away from the source.
+    x : array-like
+        Spatial coordinate corresponding to each entry in ``order``.
+    tolerance : float
+        Maximum nominal trend residual in samples.
+
+    Returns
+    -------
+    tuple
+        Updated selections, per-trace forward predictions, and the set of
+        traces still suspected of breaking the current trend.
+    """
     selected = dict(selected)
     reliable_positions = []
     pending_positions = []
@@ -526,7 +706,26 @@ def _forward_trend_guard(selected, candidates_by_trace, order, x,
 def _piecewise_linear_prediction(x, y, base_tolerance=8.0,
                                  min_segment_length=4,
                                  breakpoint_penalty=4.5):
-    """Return a robust segmented line; a new slope needs several supporting picks."""
+    """Fit a robust piecewise-linear trend to ordered picks.
+
+    Parameters
+    ----------
+    x, y : array-like
+        Ordered spatial coordinates and picked sample indices.
+    base_tolerance : float, default=8.0
+        Residual scale in samples used by the robust loss.
+    min_segment_length : int, default=4
+        Minimum number of picks required on each fitted segment.
+    breakpoint_penalty : float, default=4.5
+        Cost added for every change of slope.
+
+    Returns
+    -------
+    prediction : numpy.ndarray
+        Fitted value corresponding to every input observation.
+    breakpoints : list of int
+        Indices at which a new linear segment begins.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     count = y.size
@@ -539,6 +738,7 @@ def _piecewise_linear_prediction(x, y, base_tolerance=8.0,
     segment_cache = {}
 
     def segment(start, stop):
+        """Return the robust fit and normalized cost for one index interval."""
         key = (start, stop)
         if key not in segment_cache:
             prediction = _robust_line_prediction(x[start:stop], y[start:stop])
@@ -586,7 +786,29 @@ def _piecewise_linear_prediction(x, y, base_tolerance=8.0,
 def select_consistent_candidates(candidates_by_trace, trace_order,
                                  positions=None, base_tolerance=8.0,
                                  regularize_piecewise=True):
-    """Select candidates with robust, confirmed piecewise-linear coherence."""
+    """Select first-arrival candidates with robust spatial coherence.
+
+    Parameters
+    ----------
+    candidates_by_trace : sequence or mapping
+        Candidate dictionaries grouped by trace identifier.
+    trace_order : sequence of int
+        Trace identifiers ordered away from the source along one branch.
+    positions : array-like or None, optional
+        Receiver coordinates indexed by trace identifier. Sequential positions
+        are used when omitted.
+    base_tolerance : float, default=8.0
+        Nominal admissible residual between a candidate and trend, in samples.
+    regularize_piecewise : bool, default=True
+        If true, validate changes of slope with a segmented spatial trend.
+
+    Returns
+    -------
+    dict
+        Mapping from accepted trace identifiers to selected candidate
+        dictionaries. Returned candidates also contain spatial-prediction and
+        segment metadata when piecewise regularization is enabled.
+    """
     independent = {}
     order = []
     for item in trace_order:
@@ -816,6 +1038,7 @@ class MplCanvas(FigureCanvasQTAgg):
     """
 
     def __init__(self, parent=None, width=5, height=4, dpi=75):
+        """Create a Qt-compatible Matplotlib canvas with one set of axes."""
         # Create a new figure with specified dimensions and resolution
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         # Add a single subplot to the figure
@@ -839,10 +1062,12 @@ class CustomHomeToolbar(NavigationToolbar2QT):
     """
 
     def __init__(self, canvas, parent):
+        """Attach the toolbar to a canvas that defines custom home limits."""
         # Initialize the parent class with the given canvas and parent
         super().__init__(canvas, parent)
 
     def home(self):
+        """Restore the application-defined home limits and redraw the canvas."""
         # Override the default 'home' method
         # Set the x-axis limits to the predefined 'home' limits
         self.canvas.axes.set_xlim(*self.canvas.homeXLimits)
@@ -910,7 +1135,10 @@ class model:
 
 
 class animationPicking():
+    """Hold transient mouse and animation state for the picking interface."""
+
     def __init__(self) -> None:
+        """Initialize the picker interaction state with neutral defaults."""
         self.timeOnClick = 0        # To know if the click is in fixed position of to pan/zoom
         # Storing the current position of the mouse
         self.mousePosition = [0, 0]
@@ -936,7 +1164,10 @@ class animationPicking():
 
 
 class inversionData():
+    """Store inversion parameters, pyGIMLi objects, and the starting model."""
+
     def __init__(self) -> None:
+        """Initialize default regularization, velocity, and mesh settings."""
         self.lam = 20.0
         self.zWeight = 0.5
         self.vTop = 500.0
@@ -955,12 +1186,16 @@ class inversionData():
         self.manager = None
 
     def setStartModelGradient(self, data, mesh):
+        """Create a vertical-gradient starting model on *mesh* for *data*."""
         self.startModel = pg.Vector(createGradientModel2D(
             data, mesh, self.vTop, self.vBottom))
 
 
 class modellingAnimation():
+    """Hold interaction state for editing the layered-model hodograph."""
+
     def __init__(self) -> None:
+        """Initialize model-editing tolerances and selection state."""
         self.currPosition = [0, 0]
         self.maxClickLength = 0.5
         self.timeOnClick = 0
@@ -973,7 +1208,10 @@ class modellingAnimation():
 
 
 class modellingData():
+    """Store hodograph measurements and derived layered-model properties."""
+
     def __init__(self) -> None:
+        """Initialize empty modelling collections and a two-layer default."""
         self.sensors = []
         self.measurements = []
         self.hodoPoints = []
@@ -987,7 +1225,10 @@ class modellingData():
 
 
 class dataStorage():
+    """Aggregate all mutable data and UI state owned by the main window."""
+
     def __init__(self) -> None:
+        """Create empty acquisition, picking, modelling, and inversion state."""
         # Data variables:
         self.paths = paths()
         self.geometry = geometry()
@@ -1020,7 +1261,10 @@ class dataStorage():
 
 
 class picklingStatus():
+    """Serializable subset of application state used by save/load actions."""
+
     def __init__(self) -> None:
+        """Initialize the fields persisted in a picking-session file."""
         self.paths = paths()
         self.geometry = geometry()
         self.sisDataOriginal = []
@@ -1044,6 +1288,7 @@ class PickT0(QDialog):
     '''
 
     def __init__(self, parent):
+        """Build the t0-correction dialog for the supplied main window."""
         super().__init__()
         self.setWindowTitle('Picking t0 helper')
         self.setWindowIcon(QtGui.QIcon(
@@ -1174,6 +1419,7 @@ class PickT0(QDialog):
                 self.slider.setValue(sliderPos)
 
     def graphUpdate(self):
+        """Refresh the source-coincident trace and controls for the active shot."""
         # Changing the graph values:
         self.signal = None
         axTrace = self.traceGraph.axes
@@ -1247,6 +1493,7 @@ class PickT0(QDialog):
         self.traceGraph.draw()
 
     def updateZoom(self):
+        """Center the trace view on the current t0 value at the chosen scale."""
         axTrace = self.traceGraph.axes
         currPicking = float(self.currValue.text())
         # self.timeSEG2[0], (self.timeSEG2[-1]-self.timeSEG2[0])/1000*self.sliderZoom.value())
@@ -1261,6 +1508,7 @@ class PickT0(QDialog):
         # self.initialUpdate = False
 
     def comboBoxChange(self, newId):
+        """Select another shot by index and refresh its t0 preview."""
         self.sisFileId = newId
         self.graphUpdate()
 
@@ -1272,6 +1520,7 @@ class PickT0(QDialog):
     #     # self.newT0[self.sisFileId] = float(currPick)
 
     def updateAxisSlider(self):
+        """Convert the t0 slider position to seconds and redraw the marker."""
         if self.signal is not None:
             axTrace = self.traceGraph.axes
             # The source is located at the same position as a single trace
@@ -1293,6 +1542,7 @@ class PickT0(QDialog):
                 self.newT0[self.sisFileId] = float(currPicking)
 
     def updateText(self):
+        """Validate a typed t0 value and synchronize the position slider."""
         try:
             currPicking = float(self.currValue.text())
             rangeValue = self.rangeSlider.value()
@@ -1310,6 +1560,7 @@ class PickT0(QDialog):
             pass
 
     def updateRangeSlider(self):
+        """Rescale the t0 position slider while preserving the current value."""
         rangeValue = self.rangeSlider.value()  # New range value
         # We need to update the slider min/max values accordingly.
         currPicking = float(self.currValue.text())
@@ -1324,6 +1575,7 @@ class PickT0(QDialog):
         self.initialUpdate = False
 
     def getNewT0(self):
+        """Return the per-shot t0 corrections after a consistency check."""
         # Check that newT0 is up to date (necessary ?)
         if self.signal is not None:
             currSlider = self.slider.value()
@@ -1345,7 +1597,10 @@ class PickT0(QDialog):
 
 
 class Window(QMainWindow):
+    """Main Sardine Reborn window and controller for the processing workflow."""
+
     def __init__(self) -> None:
+        """Build the menus, tabs, shared state, plots, and event connections."""
         super().__init__()
 
         # Initializing the data structure
@@ -1844,6 +2099,7 @@ class Window(QMainWindow):
 
     # Oppening and closing message boxes:
     def showEvent(self, event):
+        """Show the application welcome message when the window opens."""
         msgBox = QMessageBox(self)
         msgBox.setIconPixmap(QtGui.QPixmap('./images/SardineRebornLogo_100ppp.png').scaled(
             200, 100, aspectRatioMode=QtCore.Qt.KeepAspectRatio))
@@ -1854,6 +2110,7 @@ class Window(QMainWindow):
         event.accept()
 
     def closeEvent(self, event):
+        """Ask for confirmation and close Matplotlib figures before exiting."""
         reply = QMessageBox.question(self, 'Closing ...', 'Are you sure you want to quit?',
                                      QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Ok)
         if reply == QMessageBox.Ok:
@@ -1868,6 +2125,7 @@ class Window(QMainWindow):
 
     # Matplotlib animations:
     def changeMouse(self, event):
+        """Record the latest cursor coordinates over the picking axes."""
         if event.inaxes is not None:
             self.dataUI.animationPicking.mousePosition = [
                 event.xdata, event.ydata]
@@ -1894,6 +2152,7 @@ class Window(QMainWindow):
         return 0
 
     def onPress(self, event):  # For both windows
+        """Start a click or drag interaction in the seismic picking view."""
         if event.button == MouseButton.LEFT or event.button == MouseButton.RIGHT:
             self.dataUI.animationPicking.timeOnClick = time.time()
             # Checking if the zoom or pan tools are checked to enable line-picking
@@ -1911,6 +2170,7 @@ class Window(QMainWindow):
         return 0
 
     def onRelease(self, event):
+        """Commit a point, line, selection rectangle, or pick-error gesture."""
         if not (self.dataUI.animationPicking.notPicking):
             # If left click and not dragging accross the pannel
             if event.button == MouseButton.LEFT and ((time.time() - self.dataUI.animationPicking.timeOnClick) < self.dataUI.animationPicking.maxClickLength):
@@ -1993,11 +2253,13 @@ class Window(QMainWindow):
         return 0
 
     def onKeyPress(self, event):
+        """Handle Matplotlib key events reserved for future picker shortcuts."""
         print(event.key)
         # if event.key == "left" or event.key == "down":
         #     print('')
 
     def onPressModelling(self, event):
+        """Select a movable hodograph control point near a mouse press."""
         if event.button == MouseButton.LEFT:
             sourceId = self.sourceSelector.currentIndex()
             receiversOrientation = self.receiversSelector.currentIndex()
@@ -2022,9 +2284,11 @@ class Window(QMainWindow):
         return
 
     def onReleaseModelling(self, event):
+        """End the current hodograph control-point drag."""
         self.dataUI.modellingAnimation.changingPts = False
 
     def changeMouseModelling(self, event):  # For the modelling window
+        """Move the selected hodograph point with the cursor during a drag."""
         if (event.inaxes is not None) and self.dataUI.modellingAnimation.changingPts:
             sourceId = self.sourceSelector.currentIndex()
             receiversOrientation = self.receiversSelector.currentIndex()
@@ -2034,6 +2298,7 @@ class Window(QMainWindow):
         return 0
 
     def animationZoom(self, i):
+        """Redraw the detail view around the cursor and current first-arrival pick."""
         axZoom = self.zoomGraph.axes
         # Get axis variables
         deltaT = float(
@@ -2113,6 +2378,7 @@ class Window(QMainWindow):
         return 0
 
     def animationMain(self, i):
+        """Redraw the visible portion of the active seismic gather when needed."""
         axMain = self.mainGraph.axes
         # Get axis variables
         deltaT = float(
@@ -2212,6 +2478,7 @@ class Window(QMainWindow):
 
     # UI objects definition
     def _openGeometry(self):
+        """Load a geometry file and the seismic files it references."""
         self.statusBar.showMessage('Openning Geometry file . . .')
         # Opening the geometry file:
         # The first argument returned is the filename and path
@@ -2293,6 +2560,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('No file loaded!', 2000)
 
     def saveDataUI(self, path, file, SEG2Files, ReceiversPosition, sensors, sourcesId):
+        """Populate application state from parsed geometry and SEG-2/SEG-Y files."""
         # Setting up the paths:
         self.dataUI.paths.directory = path
         self.dataUI.paths.geometryFile = file
@@ -2350,6 +2618,7 @@ class Window(QMainWindow):
         self.buttonManageDefective.setEnabled(True)
 
     def fftGraph(self):
+        """Toggle the main gather between time-domain traces and FFT spectra."""
         if self.dataUI.dataLoaded:
             if not (self.dataUI.animationPicking.fftShowed):
                 axMain = self.mainGraph.axes
@@ -2419,12 +2688,14 @@ class Window(QMainWindow):
                 fftAction.setText('Show FFT of dataset')
 
     def dcFilter(self):
+        """Remove the constant (DC) component from every loaded trace."""
         for st in self.dataUI.sisData:
             for tr in st:
                 tr.detrend('constant')
         self.dataUI.animationPicking.changedSelect = True
 
     def highpassFilter(self):
+        """Prompt for and apply a high-pass filter to every loaded trace."""
         band, ok = QInputDialog.getDouble(
             self, "High-pass filter", "Frequency [Hz]", 5.0, 0.0, 10000.0)
         if ok:
@@ -2434,6 +2705,7 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
 
     def lowpassFilter(self):
+        """Prompt for and apply a low-pass filter to every loaded trace."""
         band, ok = QInputDialog.getDouble(
             self, "Low-pass filter", "Frequency [Hz]", 100.0, 0.0, 10000.0)
         if ok:
@@ -2443,6 +2715,7 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
 
     def trimFilter(self):
+        """Prompt for a time interval and trim all loaded streams to it."""
         deltaT = float(
             self.dataUI.sisData[self.dataUI.sisFileId][0].stats.delta)
         nbPoints = self.dataUI.sisData[self.dataUI.sisFileId][0].stats.npts
@@ -2456,10 +2729,12 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
 
     def resetFilters(self):
+        """Restore the unfiltered seismic streams saved at load time."""
         self.dataUI.sisData = deepcopy(self.dataUI.sisDataOriginal)
         self.dataUI.animationPicking.changedSelect = True
 
     def filterSignal(self, dcFilter: bool = True, highpass: float = 5.0, lowpass: float = 100.0):
+        """Apply the standard detrend, high-pass, and low-pass preprocessing."""
         self.dataUI.sisData = deepcopy(self.dataUI.sisDataOriginal)
         if not (dcFilter) and (highpass > 0.0 or lowpass < np.Inf):
             QMessageBox.warning(
@@ -2475,7 +2750,22 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
 
     def detect_defective_geophones(self):
-        """Detect persistently dead, clipped, invalid or abnormally noisy channels."""
+        """Detect persistently dead, clipped, invalid, or noisy channels.
+
+        Returns
+        -------
+        defective : numpy.ndarray of bool
+            Per-trace mask. A trace is marked when anomalous behaviour appears
+            in at least half of the loaded shots.
+        reasons : list of str
+            Human-readable diagnostic reasons for every trace.
+
+        Notes
+        -----
+        This method reads all streams in ``self.dataUI.sisData`` but does not
+        modify them. It combines amplitude, flatness, clipping, impulsiveness,
+        and high-frequency roughness tests across shots.
+        """
         if len(self.dataUI.sisData) == 0:
             return np.array([], dtype=bool), []
         nb_files = len(self.dataUI.sisData)
@@ -2560,7 +2850,29 @@ class Window(QMainWindow):
     def remove_spatial_outliers(self, selected, candidates_by_trace,
                                 branches, anchored, excluded,
                                 receiver_distances, dt):
-        """Reject picks outside the robust segmented trajectory."""
+        """Reject or replace picks outside the robust segmented trajectory.
+
+        Parameters
+        ----------
+        selected : dict
+            Current trace-to-candidate selection; it is updated in place.
+        candidates_by_trace : sequence or mapping
+            All waveform candidates indexed by trace identifier.
+        branches : sequence of array-like
+            Trace identifiers grouped and ordered by profile side.
+        anchored, excluded : array-like of bool
+            Masks for protected manual anchors and unusable traces.
+        receiver_distances : array-like
+            Source-receiver distances in metres.
+        dt : float
+            Sampling interval in seconds.
+
+        Returns
+        -------
+        dict
+            Updated selection. Large-residual picks are replaced by a credible
+            nearby alternative or removed when no such alternative exists.
+        """
         min_tolerance = max(12.0, 0.002/max(dt, np.finfo(float).eps))
         for branch in branches:
             usable = [int(i) for i in branch
@@ -2598,7 +2910,30 @@ class Window(QMainWindow):
 
     def validate_branch_anchor(self, candidates_by_trace, branch,
                                anchored, excluded, receiver_distances, dt):
-        """Validate and lock the closest usable receiver before propagation."""
+        """Validate and lock the closest usable receiver before propagation.
+
+        Parameters
+        ----------
+        candidates_by_trace : sequence or mapping
+            Candidate dictionaries indexed by trace identifier. A validated
+            candidate is locked by assigning it a negative cost.
+        branch : array-like of int
+            Trace identifiers ordered away from the source.
+        anchored, excluded : array-like of bool
+            Masks for existing trusted picks and unusable traces.
+        receiver_distances : array-like
+            Source-receiver distances in metres.
+        dt : float
+            Sampling interval in seconds.
+
+        Returns
+        -------
+        valid : bool
+            Whether a sufficiently strong and coherent anchor was found.
+        trace_id : int or None
+            Identifier of the validated anchor, or the trace requiring manual
+            review when validation fails.
+        """
         usable = [int(i) for i in branch if not excluded[int(i)]]
         if not usable:
             return False, None
@@ -2741,7 +3076,25 @@ class Window(QMainWindow):
 
     def refine_manual_candidate(self, trace, pick_idx, signal_start,
                                 signal_stop, radius=100):
-        """Refine a manual pick locally while keeping it as a trusted anchor."""
+        """Refine a manual pick locally while retaining trusted-anchor status.
+
+        Parameters
+        ----------
+        trace : obspy.Trace
+            Seismic trace containing the manually picked arrival.
+        pick_idx : int
+            Current pick position as a sample index.
+        signal_start, signal_stop : int
+            Half-open valid signal interval in sample indices.
+        radius : int, default=100
+            Maximum search distance on either side of the manual pick.
+
+        Returns
+        -------
+        dict
+            Refined candidate metadata. Confidence is forced to one and cost
+            to a negative value so later spatial regularization preserves it.
+        """
         local_start = max(signal_start, int(pick_idx)-radius)
         local_stop = min(signal_stop, int(pick_idx)+radius+1)
         candidates = hybrid_pick_candidates(
@@ -2762,7 +3115,32 @@ class Window(QMainWindow):
     def improve_zero_offset_candidates(self, candidates_by_trace, stream,
                                        zero_offset, defective, anchored, distances,
                                        signal_start, signal_stop):
-        """Guide a zero-offset pick from nearby arrivals, then refine it locally."""
+        """Guide zero-offset picks from nearby arrivals and refine them locally.
+
+        Parameters
+        ----------
+        candidates_by_trace : sequence or mapping
+            Mutable candidate lists indexed by trace identifier.
+        stream : obspy.Stream
+            Seismic traces for the current shot.
+        zero_offset, defective, anchored : array-like of bool
+            Masks identifying colocated traces, unusable channels, and trusted
+            manual picks.
+        distances : array-like
+            Source-receiver distances in metres.
+        signal_start, signal_stop : int
+            Half-open valid signal interval in sample indices.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        The function extrapolates nearby candidate indices to zero distance and
+        promotes the best local waveform candidate in each zero-offset trace.
+        ``candidates_by_trace`` is modified in place.
+        """
         zero_ids = np.flatnonzero(zero_offset & ~defective)
         neighbour_ids = np.flatnonzero(~zero_offset & ~defective)
         neighbour_ids = neighbour_ids[np.argsort(distances[neighbour_ids])]
@@ -2815,7 +3193,22 @@ class Window(QMainWindow):
                 if item['index'] != refined['index']]
 
     def autoPicking(self):
-        """Automatically pick first breaks with a hybrid multi-trace method."""
+        """Automatically pick first arrivals with a hybrid multi-trace method.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        The method operates on every loaded shot. It combines STA/LTA and AIC
+        waveform candidates with receiver-to-receiver spatial consistency,
+        excludes defective channels, treats zero-offset traces separately, and
+        optionally preserves or refines existing manual picks. Accepted picks,
+        relative errors, masks, and display state are written to ``self.dataUI``.
+        A dialog requests a manual anchor when the first reliable trace of a
+        profile branch cannot be validated automatically.
+        """
         if not AIC_SIMPLE_IMPORT:
             QMessageBox.warning(
                 self, 'Warning !', 'Auto-picking not implemented in current version of obspy.')
@@ -3053,7 +3446,24 @@ class Window(QMainWindow):
             'Rejected traces should be reviewed manually.', 10000)
 
     def trace_branches(self, file_id):
-        """Order receiver traces away from the source on each profile side."""
+        """Order receiver traces away from the source on each profile side.
+
+        Parameters
+        ----------
+        file_id : int
+            Index of the shot in ``self.dataUI.sisData``.
+
+        Returns
+        -------
+        list of numpy.ndarray
+            One array of trace identifiers per profile side. Each array starts
+            at the receiver closest to the source and progresses outwards.
+
+        Notes
+        -----
+        For multidimensional coordinates, the profile direction is estimated
+        from the receivers by singular-value decomposition.
+        """
         nb_traces = len(self.dataUI.sisData[file_id])
         receivers = np.asarray(self.dataUI.geometry.receivers, dtype=float)
         sensors = np.asarray(self.dataUI.geometry.sensors, dtype=float)
@@ -3091,6 +3501,7 @@ class Window(QMainWindow):
         return branches if branches else [np.arange(nb_traces, dtype=int)]
 
     def traceNumberChanged(self, value):
+        """Select a trace from the spin box and request a plot refresh."""
         self.dataUI.animationPicking.currSelect = value
         curr_pick = self.dataUI.picking[self.dataUI.sisFileId, value]
         self.dataUI.animationPicking.autoPickCenter = (
@@ -3098,6 +3509,7 @@ class Window(QMainWindow):
         self.dataUI.animationPicking.changedSelect = True
 
     def updateTab0(self):
+        """Enable and refresh picking-tab controls after data-state changes."""
         self.comboBoxFilesPicking.clear()
         for name in self.dataUI.paths.seg2Files:
             self.comboBoxFilesPicking.addItem(name)
@@ -3125,6 +3537,7 @@ class Window(QMainWindow):
         self.zoomGraph.draw()
 
     def comboBoxChange(self, newId):
+        """Switch the active seismic shot and reset its display state."""
         if newId < 0 or newId >= len(self.dataUI.sisData):
             return
         self.dataUI.sisFileId = newId
@@ -3137,6 +3550,7 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.changedSelect = True
 
     def _savePicking(self):
+        """Export valid first-arrival picks and uncertainties to an SGT file."""
         self.statusBar.showMessage('Save current picking . . .')
         # Building the sgt array:
         sensors = self.dataUI.geometry.sensors
@@ -3194,6 +3608,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('No file saved!', 2000)
 
     def _loadPicking(self):
+        """Load an SGT pick file and initialize the modelling workflow."""
         self.statusBar.showMessage('Loading picking file . . .')
         # 1) Load a file with the first arrival:
         fName, _ = QFileDialog.getOpenFileName(
@@ -3291,6 +3706,7 @@ class Window(QMainWindow):
             self._initModelling()
 
     def _initPygimli(self, fname):
+        """Read an SGT file into pyGIMLi and prepare inversion data objects."""
         # Preparing inversion of data (pygimli)
         self.dataUI.invData.data = pg.DataContainer(fname, sensorTokens='s g')
         self.dataUI.invData.data.sortSensorsX(incX=True)
@@ -3307,6 +3723,7 @@ class Window(QMainWindow):
         self.invModelGraph.draw()
 
     def _initModelling(self):
+        """Build initial layered models for every source and orientation."""
         if len(self.dataUI.modellingData.sensors) == 0:
             return
         sensors, measurements = self.dataUI.modellingData.sensors, self.dataUI.modellingData.measurements
@@ -3438,6 +3855,7 @@ class Window(QMainWindow):
                 self, 'Warning !', 'Impossible to model using the intercept time method!\nThe robustness of this method needs to be improved.')
 
     def _updateHodoGraph(self):
+        """Redraw measured and interpreted travel-time hodographs."""
         axHod = self.hodochronesGraph.axes
         axHod.cla()
         maxY = self.plotHodochrones(
@@ -3461,6 +3879,7 @@ class Window(QMainWindow):
         self.hodochronesGraph.draw()
 
     def _updateModelGraph(self):
+        """Redraw the layered velocity model derived from the hodographs."""
         axMod = self.modelGraph.axes
         axMod.cla()
         # Show the sensors array at the surface:
@@ -3521,6 +3940,7 @@ class Window(QMainWindow):
         self.modelGraph.draw()
 
     def _updateModelling(self, frame):
+        """Animation callback that recomputes plots after point edits."""
         # Gather the number of layers in the model
         nbLayers = self.dataUI.modellingData.nbLayers
         # Gathering the info about intercept times and apparent velocities:
@@ -3545,6 +3965,7 @@ class Window(QMainWindow):
         self._updateModelGraph()
 
     def animateModelling(self):
+        """Start periodic redraws for interactive layered-model editing."""
         self.connectMouse = self.hodochronesGraph.mpl_connect(
             'motion_notify_event', self.changeMouseModelling)
         self.connectPress = self.hodochronesGraph.mpl_connect(
@@ -3557,6 +3978,7 @@ class Window(QMainWindow):
         self.hodochronesGraph.draw()
 
     def setAnimationModelling(self):
+        """Enable or disable mouse-driven hodograph point editing."""
         if self.aniModelling is None:
             if self.movePoints.isChecked():
                 self.animateModelling()
@@ -3576,11 +3998,13 @@ class Window(QMainWindow):
                 self.hodochronesGraph.mpl_disconnect(self.connectRelease)
 
     def sourceSelectorChanged(self, i):
+        """Update orientation choices and plots for the selected source."""
         self.receiversSelector.clear()
         self.receiversSelector.addItems(
             self.dataUI.modellingAnimation.namesOrientations[i])
 
     def plotHodochrones(self, sensors, measurements):
+        """Plot travel-time measurements grouped by source location."""
         ax = self.hodochronesGraph.axes
         maxY = 0
         sources = np.unique(measurements[:, 0]).astype(int)
@@ -3613,6 +4037,7 @@ class Window(QMainWindow):
     #     self.statusBar.showMessage(DEFAULT_STATUS)
 
     def _loadInvMesh(self):
+        """Load a previously saved mesh for the inversion."""
         # Load an inversion mesh that was already created (*.poly)
         fName, _ = QFileDialog.getOpenFileName(
             self, 'Select file to load', filter='GIMLi mesh file (*.bms)')
@@ -3627,6 +4052,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('No mesh could be loaded!', 2000)
 
     def _loadInitModel(self):
+        """Load a starting velocity model for the active inversion mesh."""
         # Load an existing model as the starting model (*.vector) for the inversion
         fName, _ = QFileDialog.getOpenFileName(
             self, 'Select file to load', filter='Result Vector file (*.vector)')
@@ -3648,6 +4074,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('No initial model loaded!', 2000)
 
     def _saveInvMesh(self):
+        """Save the current inversion mesh to a user-selected file."""
         # Save the inversion mesh (*.poly)
         fName, _ = QFileDialog.getSaveFileName(
             self, 'Select file to save', filter='GIMLi mesh file (*.bms)')
@@ -3658,6 +4085,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('No mesh saved!', 2000)
 
     def _saveInvAsVTK(self):
+        """Export the inversion mesh and model values in VTK format."""
         # Save the inversion results into a VTK file (for Paraview)
         fName, _ = QFileDialog.getSaveFileName(
             self, 'Select file to save', filter='Paraview mesh file (*.vtk)')
@@ -3676,6 +4104,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('Results where NOT saved!', 2000)
 
     def _saveInvResponse(self):
+        """Export the simulated travel-time response of the inversion result."""
         # Save the model response for the last iteration (*.vector)
         fName, _ = QFileDialog.getSaveFileName(
             self, 'Select file to save', filter='Response Vector file (*.vector)')
@@ -3686,6 +4115,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('Response was NOT saved!', 2000)
 
     def _saveInvResult(self):
+        """Save the recovered velocity model as a numeric vector."""
         # Save the model for the last iteration (*.vector)
         fName, _ = QFileDialog.getSaveFileName(
             self, 'Select file to save', filter='Result Vector file (*.vector)')
@@ -3696,6 +4126,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('Result was NOT saved!', 2000)
 
     def _pickTracesTabUI(self):
+        """Construct and return the seismic trace-picking tab."""
         importTab = QWidget(self.tabs)
         layout = QGridLayout(self.tabs)  # Grid of 10-by-15
 
@@ -3800,7 +4231,25 @@ class Window(QMainWindow):
         return importTab
 
     def select_t0_near_branch(self, ordered_ids, distances, picks, dt):
-        """Keep the closest coherent travel-time branch (maximum five picks)."""
+        """Keep the closest coherent travel-time branch for t0 estimation.
+
+        Parameters
+        ----------
+        ordered_ids : array-like of int
+            Candidate trace identifiers ordered by increasing source distance.
+        distances : array-like
+            Source-receiver distances in metres, indexed by trace identifier.
+        picks : array-like
+            Travel-time picks in seconds, indexed by trace identifier.
+        dt : float
+            Sampling interval in seconds.
+
+        Returns
+        -------
+        numpy.ndarray of int
+            Identifiers belonging to the initial coherent branch. Callers
+            provide at most five candidates.
+        """
         ordered_ids = np.asarray(ordered_ids, dtype=int)
         if ordered_ids.size <= 2:
             return ordered_ids
@@ -3841,7 +4290,19 @@ class Window(QMainWindow):
         return np.asarray(selected, dtype=int)
 
     def recalculateT0FromGeometry(self):
-        """Shift every shot so the extrapolated travel time at distance 0 is 0."""
+        """Shift every shot so its inferred zero-distance travel time is zero.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        A colocated source-receiver pick is preferred when available. Offset
+        shots instead use a robust extrapolation of up to five nearby picks on
+        the first coherent branch. After user confirmation, the correction is
+        subtracted from finite picks and from ``self.dataUI.beginTime``.
+        """
         if not self.dataUI.dataLoaded or len(self.dataUI.sisData) == 0:
             QMessageBox.warning(self, 'Warning!', 'No seismic data are loaded.')
             return
@@ -3931,6 +4392,7 @@ class Window(QMainWindow):
             10000)
 
     def setT0(self):
+        """Open the t0 helper and apply accepted per-shot time corrections."""
         if self.dataUI.dataLoaded:
             newWindow = PickT0(self)
             newWindow.show()
@@ -3943,6 +4405,7 @@ class Window(QMainWindow):
             self.dataUI.animationPicking.changedSelect = True
 
     def setPicking(self):
+        """Suspend or resume plot interaction while manual-picking mode changes."""
         if self.dataUI.dataLoaded:
             if self.buttonTabPickingSet.isChecked():
                 # We stop the animation:
@@ -3970,6 +4433,7 @@ class Window(QMainWindow):
                 self.buttonManageDefective.setEnabled(True)
 
     def resetPicking(self):
+        """Clear all picks and manual-pick flags from the loaded dataset."""
         if self.dataUI.dataLoaded:
             self.dataUI.picking = np.empty(
                 (len(self.dataUI.paths.seg2Files), len(self.dataUI.sisData[0])))
@@ -4074,7 +4538,21 @@ class Window(QMainWindow):
         self.statusBar.showMessage(message, 5000)
 
     def reciprocity_mismatches(self):
-        """Find reciprocal shot/receiver pairs inconsistent beyond 3 sigma."""
+        """Find reciprocal picks whose difference exceeds three uncertainties.
+
+        Returns
+        -------
+        mismatches : list of dict
+            Violating shot pairs and their two times, absolute difference,
+            three-sigma threshold, and combined one-sigma uncertainty.
+        checked : int
+            Number of usable reciprocal pairs tested.
+
+        Notes
+        -----
+        The calculation uses picks currently held by the interface. Offset
+        shots, missing picks, and traces marked defective are ignored.
+        """
         picks = np.asarray(self.dataUI.picking, dtype=float)
         errors = np.asarray(self.dataUI.pickingError, dtype=float)
         receivers = np.asarray(self.dataUI.geometry.receivers, dtype=float)
@@ -4141,7 +4619,15 @@ class Window(QMainWindow):
         return mismatches, checked
 
     def reciprocity_mismatches_from_sgt(self):
-        """Check reciprocal pairs directly from the currently loaded .sgt."""
+        """Check reciprocal pairs directly from the currently loaded SGT data.
+
+        Returns
+        -------
+        tuple or None
+            ``(mismatches, checked)`` with the same meaning as
+            :meth:`reciprocity_mismatches`, or ``None`` when the loaded
+            modelling arrays do not contain valid SGT measurements.
+        """
         sensors = np.asarray(self.dataUI.modellingData.sensors, dtype=float)
         measurements = np.asarray(
             self.dataUI.modellingData.measurements, dtype=float)
@@ -4179,6 +4665,7 @@ class Window(QMainWindow):
             threshold = 3.0*combined_error
             if difference > threshold:
                 def label(sensor_id):
+                    """Format a sensor identifier and its coordinates for reports."""
                     if 1 <= sensor_id <= len(sensors):
                         xy = sensors[sensor_id-1]
                         return f'shot sensor {sensor_id} ({xy[0]:.2f}, {xy[1]:.2f})'
@@ -4248,6 +4735,7 @@ class Window(QMainWindow):
         message.exec()
 
     def _inversionTabUI(self):
+        """Construct and return the travel-time inversion configuration tab."""
         # Tab for the inversion of the data using pygimli api.
         inversionTab = QWidget(self.tabs)
         layout = QGridLayout(self.tabs)
@@ -4439,6 +4927,19 @@ class Window(QMainWindow):
             f'quality {self.dataUI.invData.meshQuality:.2f}.', 6000)
 
     def _runInversion(self):
+        """Run a pyGIMLi travel-time inversion from the current UI settings.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Regularization, velocity limits, mesh settings, and the gradient start
+        model are read from the inversion tab. The method rebuilds the mesh,
+        runs ``TravelTimeManager.invert``, stores the resulting manager and
+        state in ``self.dataUI``, and refreshes both the misfit and model plots.
+        """
         # Parameters for inversion:
         self.dataUI.invData.lam = float(self.setLambda.text())
         self.dataUI.invData.zWeight = float(self.setZWeight.text())
@@ -4614,7 +5115,20 @@ class Window(QMainWindow):
         self.resultCoverageMask.setEnabled(is_model)
 
     def refreshInversionDisplay(self):
-        """Render the selected inversion result view with the chosen options."""
+        """Render the selected inversion-result view with the chosen options.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Depending on the selector, this displays the velocity model,
+        standardized coverage, ray coverage, or observed/modelled first picks.
+        Colour limits, scale, colormap, colorbar orientation, ray paths, and
+        coverage masking are taken from the display controls. Invalid settings
+        are reported in the interface without changing the inversion result.
+        """
         manager = self.dataUI.invData.manager
         if (not self.dataUI.inversionDone or manager is None or
                 not hasattr(manager, 'inv')):
@@ -4881,6 +5395,7 @@ class Window(QMainWindow):
         return modellingTab
 
     def saveStatePicking(self):
+        """Serialize the current data and picking session to a pickle file."""
         fName, _ = QFileDialog.getSaveFileName(
             self, 'Select file to save', filter='Pickled structure (*.pkl)')
         if fName != "":
@@ -4903,6 +5418,7 @@ class Window(QMainWindow):
             self.statusBar.showMessage('Result was NOT saved!', 2000)
 
     def loadStatePicking(self):
+        """Restore a previously serialized picking session into the interface."""
         fName, _ = QFileDialog.getOpenFileName(
             self, 'Select file to load', filter='Pickled structure (*.pkl)')
         if fName != "":
